@@ -1,0 +1,96 @@
+import { config as loadDotenv } from "dotenv";
+import path from "node:path";
+
+for (const candidate of [
+  path.resolve(process.cwd(), ".env.local"),
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(process.cwd(), "apps/server/.env.local"),
+  path.resolve(process.cwd(), "apps/server/.env")
+]) {
+  loadDotenv({ path: candidate, quiet: true });
+}
+
+type EnvConfig = {
+  port: number;
+  webOrigin: string;
+  supabaseUrl: string | null;
+  supabaseAnonKey: string | null;
+  supabaseServiceRoleKey: string | null;
+  composioApiKey: string | null;
+  composioBaseUrl: string;
+  composioConnectCallbackUrl: string;
+  anthropicApiKey: string | null;
+  anthropicModel: string;
+  speechmaticsApiKey: string | null;
+  speechmaticsApiBaseUrl: string;
+  speechmaticsRtUrl: string;
+  speechmaticsLanguage: string;
+  speechmaticsEnablePartials: boolean;
+  speechmaticsMaxDelaySeconds: number;
+  elevenLabsApiKey: string | null;
+  elevenLabsVoiceId: string;
+  elevenLabsModelId: string;
+};
+
+function readString(name: string, fallback = ""): string {
+  const raw = process.env[name];
+  if (typeof raw !== "string") {
+    return fallback;
+  }
+  return raw.trim();
+}
+
+function readOptional(name: string): string | null {
+  const value = readString(name);
+  return value.length > 0 ? value : null;
+}
+
+function readBoolean(name: string, fallback: boolean): boolean {
+  const raw = readString(name);
+  if (raw.length === 0) {
+    return fallback;
+  }
+  const normalized = raw.toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function readNumber(name: string, fallback: number): number {
+  const raw = readString(name);
+  if (raw.length === 0) {
+    return fallback;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function getEnvConfig(): EnvConfig {
+  const port = readNumber("PORT", 4000);
+  const webOrigin = readString("WEB_ORIGIN", "http://localhost:5173");
+
+  return {
+    port,
+    webOrigin,
+    supabaseUrl: readOptional("SUPABASE_URL"),
+    supabaseAnonKey: readOptional("SUPABASE_ANON_KEY"),
+    supabaseServiceRoleKey: readOptional("SUPABASE_SERVICE_ROLE_KEY"),
+    composioApiKey: readOptional("COMPOSIO_API_KEY"),
+    composioBaseUrl: readString("COMPOSIO_BASE_URL", "https://backend.composio.dev"),
+    composioConnectCallbackUrl: readString(
+      "COMPOSIO_CONNECT_CALLBACK_URL",
+      `http://localhost:${port}/v1/composio/connect/callback`
+    ),
+    anthropicApiKey: readOptional("ANTHROPIC_API_KEY"),
+    anthropicModel: readString("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+    speechmaticsApiKey: readOptional("SPEECHMATICS_API_KEY"),
+    speechmaticsApiBaseUrl: readString("SPEECHMATICS_API_BASE_URL", "https://asr.api.speechmatics.com/v2"),
+    speechmaticsRtUrl: readString("SPEECHMATICS_RT_URL", "wss://eu2.rt.speechmatics.com/v2"),
+    speechmaticsLanguage: readString("SPEECHMATICS_LANGUAGE", "en"),
+    speechmaticsEnablePartials: readBoolean("SPEECHMATICS_ENABLE_PARTIALS", true),
+    speechmaticsMaxDelaySeconds: readNumber("SPEECHMATICS_MAX_DELAY_SECONDS", 1.1),
+    elevenLabsApiKey: readOptional("ELEVENLABS_API_KEY"),
+    elevenLabsVoiceId: readString("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+    elevenLabsModelId: readString("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+  };
+}
+
+export type { EnvConfig };

@@ -1,0 +1,30 @@
+{
+  "name": "@mark/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "pnpm --filter @mark/contracts build",
+    "prebuild": "pnpm --filter @mark/contracts build",
+    "pretypecheck": "pnpm --filter @mark/contracts build",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit"
+  },
+  "dependencies": {
+    "@mark/contracts": "workspace:*",
+    "@supabase/supabase-js": "^2.98.0",
+    "lamejsfixbug121": "^1.0.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "mark-voice-agent",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.28.1",
+  "scripts": {
+    "dev": "pnpm --filter @mark/contracts build && concurrently -k \"pnpm --filter @mark/server dev\" \"pnpm --filter @mark/web dev\"",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm --filter @mark/contracts build && pnpm -r typecheck",
+    "test": "pnpm -r --if-present test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.2"
+  }
+}

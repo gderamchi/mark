@@ -7,7 +7,7 @@ for (const candidate of [
   path.resolve(process.cwd(), "apps/server/.env.local"),
   path.resolve(process.cwd(), "apps/server/.env")
 ]) {
-  loadDotenv({ path: candidate, quiet: true });
+  loadDotenv({ path: candidate, override: true });
 }
 
 type EnvConfig = {
@@ -33,6 +33,10 @@ type EnvConfig = {
   elevenLabsApiKey: string | null;
   elevenLabsVoiceId: string;
   elevenLabsModelId: string;
+  elevenLabsAgentId: string | null;
+  elevenLabsWebhookSecret: string | null;
+  publicServerUrl: string | null;
+  demoMode: boolean;
 };
 
 function readString(name: string, fallback = ""): string {
@@ -100,7 +104,11 @@ export function getEnvConfig(): EnvConfig {
     speechmaticsMaxDelaySeconds: readNumber("SPEECHMATICS_MAX_DELAY_SECONDS", 1.1),
     elevenLabsApiKey: readOptional("ELEVENLABS_API_KEY"),
     elevenLabsVoiceId: readString("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-    elevenLabsModelId: readString("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+    elevenLabsModelId: readString("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"),
+    elevenLabsAgentId: readOptional("ELEVENLABS_AGENT_ID"),
+    elevenLabsWebhookSecret: readOptional("ELEVENLABS_WEBHOOK_SECRET"),
+    publicServerUrl: readOptional("PUBLIC_SERVER_URL"),
+    demoMode: readBoolean("DEMO_MODE", false)
   };
 }
 

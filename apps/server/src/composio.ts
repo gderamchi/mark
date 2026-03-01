@@ -216,6 +216,18 @@ export class ComposioService {
     throw new Error(`Tool ${tool.toolSlug} failed for all connected accounts: ${fallbackMessage}`);
   }
 
+  /**
+   * Execute a tool by slug directly, without needing a full tool definition.
+   * Useful when we know the slug but don't have the tool in our DB/cache.
+   */
+  async executeToolDirect(
+    composioUserId: string,
+    toolSlug: string,
+    args: Record<string, unknown>
+  ): Promise<unknown> {
+    return this.runExecute(toolSlug, composioUserId, null, args);
+  }
+
   private async runExecute(
     toolSlug: string,
     composioUserId: string,

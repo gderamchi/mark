@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 
 import type {
@@ -10,15 +10,16 @@ import type {
 } from "@mark/contracts";
 
 import { StatusAlerts } from "./components/StatusAlerts";
-import { TopBar } from "./components/TopBar";
 import type { ProviderDiagnosticItem } from "./components/types";
 import { VoiceStage } from "./components/VoiceStage";
+import { buildApiUrl, normalizeApiBaseUrl } from "./apiBaseUrl";
 import { supabase } from "./supabase";
 import type { CatalogListItem } from "./tabs/AppsTab";
 import type { TimelineViewItem } from "./tabs/TimelineTab";
-import { useVoiceAgent } from "./useVoiceAgent";
+import { useElevenLabsVoice } from "./useElevenLabsVoice";
+import type { VoiceState } from "@mark/contracts";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -33,10 +34,13 @@ export function App() {
   const [connectedBanner, setConnectedBanner] = useState<string | null>(null);
   const [pendingConnectionRefresh, setPendingConnectionRefresh] = useState(false);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const accessToken = session?.access_token ?? null;
 
-  const agent = useVoiceAgent(audioRef.current, accessToken);
+  const el = useElevenLabsVoice(accessToken);
+
+  const elConnected = el.status === "connected";
+  const elIsRunning = el.status === "connected" || el.status === "connecting";
+  const elVoiceState: VoiceState = el.isSpeaking ? "speaking" : elConnected ? "listening" : "idle";
 
   useEffect(() => {
     if (!supabase) {
@@ -151,6 +155,7 @@ export function App() {
       const isActive = connection?.status.toUpperCase() === "ACTIVE";
       return {
         authConfigId: item.authConfigId,
+        toolkitSlug: item.toolkitSlug,
         toolkitName: item.toolkitName,
         name: item.name,
         authScheme: item.authScheme,
@@ -161,18 +166,6 @@ export function App() {
   }, [connectionsByAuthConfigId, connectionsByToolkitSlug, filteredCatalog]);
 
   const timelineView = useMemo(() => {
-    if (agent.actionTimeline.length > 0) {
-      return {
-        sourceLabel: "Live session events",
-        items: agent.actionTimeline.slice(0, 16).map<TimelineViewItem>((item) => ({
-          id: item.id,
-          type: item.type,
-          message: item.message,
-          createdAt: item.createdAt
-        }))
-      };
-    }
-
     if (history.length > 0) {
       return {
         sourceLabel: "Persisted action history",
@@ -189,35 +182,14 @@ export function App() {
       sourceLabel: "No events yet",
       items: []
     };
-  }, [agent.actionTimeline, history]);
+  }, [history]);
 
   const providerDiagnostics = useMemo<ProviderDiagnosticItem[]>(() => {
-    if (!agent.health) {
-      return [
-        { label: "STT", value: "checking" },
-        { label: "LLM", value: "checking" },
-        { label: "Composio", value: "checking" },
-        { label: "Auth", value: "checking" },
-        { label: "TTS", value: "checking" }
-      ];
-    }
-
     return [
-      { label: "STT", value: agent.health.sttConfigured ? "ready" : "missing" },
-      { label: "LLM", value: agent.health.llmConfigured ? "ready" : "missing" },
-      { label: "Composio", value: agent.health.composioConfigured ? "ready" : "missing" },
-      { label: "Auth", value: agent.health.authConfigured ? "ready" : "missing" },
-      { label: "TTS", value: agent.health.ttsConfigured ? "ready" : "missing" },
-      {
-        label: "Speechmatics TTS",
-        value: agent.health.ttsProviders?.speechmaticsConfigured ? "ready" : "missing"
-      },
-      {
-        label: "ElevenLabs TTS",
-        value: agent.health.ttsProviders?.elevenLabsConfigured ? "ready" : "missing"
-      }
+      { label: "Voice", value: elConnected ? "ready" : "idle" },
+      { label: "ElevenLabs", value: elConnected ? "ready" : "waiting" }
     ];
-  }, [agent.health]);
+  }, [elConnected]);
 
   const signInWithGoogle = async (): Promise<void> => {
     if (!supabase) {
@@ -239,7 +211,7 @@ export function App() {
     if (!supabase) {
       return;
     }
-    await agent.stop();
+    await el.stop();
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) {
       setError(signOutError.message);
@@ -280,66 +252,73 @@ export function App() {
     <div className="page">
       <main className="shell">
         {!session ? (
-          <>
-            <TopBar
-              session={session}
-              userEmail={user?.email ?? null}
-              onSignIn={() => {
-                void signInWithGoogle();
-              }}
-              onSignOut={() => {
-                void signOut();
-              }}
-            />
-            <section className="auth-guard card">
+          <section className="stitch-root stitch-phone-shell stitch-auth-shell" aria-label="Authentication required">
+            <div className="stitch-ambient-fluid-border stitch-ambient-fluid-border-strong" aria-hidden />
+
+            <header className="stitch-header stitch-auth-header">
+              <div className="stitch-auth-brand">
+                <p className="stitch-auth-eyebrow">Mark Agent</p>
+                <h1>Voice Assistant</h1>
+              </div>
+            </header>
+
+            <section className="stitch-auth-body">
               <h2>Authentication Required</h2>
               <p>
                 Sign in to unlock voice actions, app connections, and approval-gated execution. Voice loops remain protected
                 by Supabase access tokens.
               </p>
               <button
-                className="btn btn-primary"
+                className="stitch-auth-cta"
                 onClick={() => {
                   void signInWithGoogle();
                 }}
               >
                 Continue With Google
               </button>
-              {!supabase ? <p className="alert alert-error">Missing `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY`.</p> : null}
+              {!supabase ? <p className="stitch-auth-error">Missing `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY`.</p> : null}
             </section>
-          </>
+          </section>
         ) : (
           <>
-            <StatusAlerts connectedBanner={connectedBanner} errorMessage={agent.error ?? error} />
+            <StatusAlerts connectedBanner={connectedBanner} errorMessage={el.error ?? error} />
             <VoiceStage
-              connected={agent.connected}
-              isRunning={agent.isRunning}
-              voiceState={agent.voiceState}
-              audioLevel={agent.audioLevel}
-              sessionId={agent.sessionId}
-              userPartial={agent.userPartial}
-              userFinal={agent.userFinal}
-              agentPartial={agent.agentPartial}
-              agentFinal={agent.agentFinal}
-              pendingAction={agent.pendingAction}
-              actionStatus={agent.actionStatus}
-              actionTimeline={agent.actionTimeline}
-              sttMessage={agent.sttStatus?.message ?? null}
-              actionStatusMessage={agent.actionStatus?.message ?? null}
-              activeTtsProvider={agent.activeTtsProvider}
+              connected={elConnected}
+              isRunning={elIsRunning}
+              isMicMuted={false}
+              voiceState={elVoiceState}
+              audioLevel={0}
+              sessionId={null}
+              userPartial=""
+              userFinal={el.userTranscript}
+              agentPartial=""
+              agentFinal={el.agentTranscript}
+              pendingAction={null}
+              actionStatus={null}
+              actionTimeline={[]}
+              sttMessage={elConnected ? "Listening via ElevenLabs" : null}
+              actionStatusMessage={null}
+              activeTtsProvider={el.isSpeaking ? "elevenlabs" : null}
               providerDiagnostics={providerDiagnostics}
               onStart={() => {
-                void agent.start();
+                void el.start();
               }}
               onStop={() => {
-                void agent.stop();
+                void el.stop();
               }}
-              onResetMemory={agent.resetMemory}
+              onToggleMic={() => {
+                if (!elIsRunning) {
+                  void el.start();
+                } else {
+                  void el.stop();
+                }
+              }}
+              onResetMemory={() => {}}
               onSignOut={() => {
                 void signOut();
               }}
-              onApprovePending={agent.approvePending}
-              onRejectPending={() => agent.rejectPending("Rejected from notification card.")}
+              onApprovePending={() => {}}
+              onRejectPending={() => {}}
               loadingApps={loadingCatalog}
               appsSearch={catalogSearch}
               onAppsSearchChange={setCatalogSearch}
@@ -355,7 +334,6 @@ export function App() {
         )}
       </main>
 
-      <audio ref={audioRef} hidden playsInline />
     </div>
   );
 
@@ -392,7 +370,7 @@ export function App() {
 }
 
 async function authedFetch<T>(path: string, accessToken: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(buildApiUrl(API_BASE_URL, path), {
     ...init,
     headers: {
       authorization: `Bearer ${accessToken}`,

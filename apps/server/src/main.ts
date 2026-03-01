@@ -30,6 +30,7 @@ import {
   type TtsAudioEndEvent
 } from "@mark/contracts";
 
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { ActionOrchestrator } from "./actionOrchestrator.js";
 import {
   AnthropicService,
@@ -40,6 +41,9 @@ import { ApprovalIntentService } from "./approvalIntent.js";
 import { AuthError, AuthService, getBearerToken, type AuthenticatedUser } from "./auth.js";
 import { AuditService } from "./audit.js";
 import { ComposioService, type AgentToolDefinition } from "./composio.js";
+import { ComposioSyncService } from "./composioSync.js";
+import { ElevenLabsAgentService } from "./elevenlabsAgent.js";
+import { createElevenLabsWebhookRouter } from "./elevenlabsWebhook.js";
 import { EmailIntentRouter, type EmailIntent, normalizeTimeZone } from "./emailIntentRouter.js";
 import { ElevenLabsService } from "./elevenlabs.js";
 import { getEnvConfig } from "./env.js";
@@ -102,6 +106,14 @@ const tts = new TtsRouter(speechmaticsTts, elevenLabsTts);
 const auth = new AuthService(env);
 const audit = new AuditService(env);
 const composio = new ComposioService(env);
+const composioSync = new ComposioSyncService(env, composio);
+const elAgent = new ElevenLabsAgentService(env);
+const db: SupabaseClient | null =
+  env.supabaseUrl && env.supabaseServiceRoleKey
+    ? createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false }
+      })
+    : null;
 const actionOrchestrator = new ActionOrchestrator(audit);
 const approvalIntent = new ApprovalIntentService();
 const emailIntentRouter = new EmailIntentRouter();
@@ -223,6 +235,12 @@ app.get("/v1/composio/connect/callback", async (req, res) => {
     await composio.waitForConnection(connectedAccountId).catch(() => undefined);
   }
 
+  // Trigger immediate sync for this user if we can resolve the user from a recent auth session.
+  // The callback is unauthenticated (redirect from Composio), so we sync all users as a fallback.
+  composioSync.syncAllUsers().catch((err) => {
+    console.error("[composio-sync] post-callback sync error:", err);
+  });
+
   const location = new URL(env.webOrigin);
   location.searchParams.set("connected", connectedAccountId ? "1" : "0");
   if (connectedAccountId) {
@@ -235,6 +253,181 @@ app.get("/v1/actions/history", requireHttpAuth, async (req, res) => {
   const { authUser } = req as AuthedRequest;
   const items = await audit.listHistory(authUser.id);
   res.json({ items } satisfies ActionHistoryResponse);
+});
+
+app.use(createElevenLabsWebhookRouter({ env, composio, audit }));
+
+app.get("/v1/el/signed-url", requireHttpAuth, async (req, res) => {
+  const { authUser } = req as AuthedRequest;
+  console.log("[el-signed-url] request from user:", authUser.id);
+
+  if (!elAgent.isConfigured()) {
+    console.warn("[el-signed-url] agent not configured");
+    res.status(503).json({ error: "ElevenLabs agent is not configured" });
+    return;
+  }
+  try {
+    const signedUrl = await elAgent.getSignedUrl();
+    console.log("[el-signed-url] got signed URL");
+
+    // Read user context from DB (pre-populated by the cron)
+    let startupContext = "";
+    let firstMessage = "";
+    let emailFeed: Array<{ from: string; subject: string; importance: "must_know" | "respond_needed" | "optional"; reason: string; hasDraft: boolean }> = [];
+    if (db) {
+      const [connectionsResult, emailsResult, draftsResult, slackResult, calEventsResult] = await Promise.all([
+        db
+          .from("user_composio_connections")
+          .select("toolkit_slug, toolkit_name, status")
+          .eq("user_id", authUser.id)
+          .eq("status", "ACTIVE")
+          .order("toolkit_name"),
+        db
+          .from("user_recent_emails")
+          .select("message_id, from_address, subject, snippet, received_at, label_ids, importance, importance_reason")
+          .eq("user_id", authUser.id)
+          .order("received_at", { ascending: false })
+          .limit(20),
+        db
+          .from("user_email_drafts")
+          .select("message_id, subject, draft_body")
+          .eq("user_id", authUser.id),
+        db
+          .from("user_recent_slack_messages")
+          .select("channel_name, sender_name, message_text, received_at")
+          .eq("user_id", authUser.id)
+          .order("received_at", { ascending: false })
+          .limit(15),
+        db
+          .from("user_demo_calendar_events")
+          .select("event_name, attendee_email, calendly_link, start_time, end_time, linked_message_id")
+          .eq("user_id", authUser.id)
+      ]);
+
+      if (connectionsResult.error) {
+        console.error("[el-signed-url] DB connections error:", connectionsResult.error.message);
+      }
+      if (emailsResult.error) {
+        console.error("[el-signed-url] DB emails error:", emailsResult.error.message);
+      }
+      if (draftsResult.error) {
+        console.error("[el-signed-url] DB drafts error:", draftsResult.error.message);
+      }
+      if (slackResult.error) {
+        console.error("[el-signed-url] DB slack error:", slackResult.error.message);
+      }
+      if (calEventsResult.error) {
+        console.error("[el-signed-url] DB calendar events error:", calEventsResult.error.message);
+      }
+
+      // Build draft lookup map
+      type DraftRow = { message_id: string; subject: string; draft_body: string };
+      const drafts = (draftsResult.data ?? []) as DraftRow[];
+      const draftMap = new Map<string, DraftRow>();
+      for (const d of drafts) {
+        draftMap.set(d.message_id, d);
+      }
+
+      const activeApps = (connectionsResult.data ?? [])
+        .map((c: { toolkit_name: string }) => c.toolkit_name)
+        .filter((v: string, i: number, a: string[]) => a.indexOf(v) === i);
+
+      const parts: string[] = [];
+      parts.push(`Connected apps: ${activeApps.length > 0 ? activeApps.join(", ") : "none"}`);
+
+      type EmailRow = {
+        message_id: string;
+        from_address: string;
+        subject: string;
+        snippet: string;
+        received_at: string;
+        label_ids: string[];
+        importance: string;
+        importance_reason: string;
+      };
+
+      const emails = (emailsResult.data ?? []) as EmailRow[];
+
+      // Pick ONE important email to focus the demo on
+      const heroEmail = emails.find((e) => e.importance === "must_know" || e.importance === "respond_needed")
+        ?? emails.find((e) => draftMap.has(e.message_id))
+        ?? emails[0];
+
+      type SlackRow = { channel_name: string; sender_name: string; message_text: string; received_at: string };
+      const slackMessages = (slackResult.data ?? []) as SlackRow[];
+
+      type CalEventRow = { event_name: string; attendee_email: string; calendly_link: string; start_time: string; end_time: string; linked_message_id: string };
+      const calEvents = (calEventsResult.data ?? []) as CalEventRow[];
+
+      if (heroEmail) {
+        const draft = draftMap.get(heroEmail.message_id);
+        parts.push(`Important email to respond to:`);
+        parts.push(`- [message_id: ${heroEmail.message_id}] From: ${heroEmail.from_address} | Subject: ${heroEmail.subject}`);
+        if (draft) {
+          const preview = draft.draft_body.slice(0, 200).replace(/\n/g, " ");
+          parts.push(`- [message_id: ${heroEmail.message_id}] Prepared draft reply: ${preview}...`);
+        }
+
+        // Add Calendly availability if linked
+        const calEvent = calEvents.find((ev) => ev.linked_message_id === heroEmail.message_id);
+        if (calEvent) {
+          const startDate = new Date(calEvent.start_time);
+          const endDate = new Date(calEvent.end_time);
+          const dateStr = startDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+          const startTimeStr = startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+          const endTimeStr = endDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+          const link = calEvent.calendly_link || "https://calendly.com/demo/30min";
+          parts.push(`- Calendly: you are free tomorrow ${dateStr} ${startTimeStr}-${endTimeStr}. Link: ${link}`);
+          parts.push(`  When reading the draft, mention that you checked the user's availability and include the Calendly link.`);
+        }
+      } else {
+        parts.push("No important emails right now.");
+      }
+
+      startupContext = parts.join("\n");
+
+      // Build emailFeed — only the hero email
+      if (heroEmail) {
+        emailFeed = [{
+          from: heroEmail.from_address,
+          subject: heroEmail.subject,
+          importance: heroEmail.importance as "must_know" | "respond_needed" | "optional",
+          reason: heroEmail.importance_reason,
+          hasDraft: draftMap.has(heroEmail.message_id)
+        }];
+      }
+
+      // Build firstMessage — simple, one email
+      if (heroEmail) {
+        const senderName = extractSenderName(heroEmail.from_address);
+        const subject = compactSubject(heroEmail.subject);
+        const hasDraft = draftMap.has(heroEmail.message_id);
+        const calEvent = calEvents.find((ev) => ev.linked_message_id === heroEmail.message_id);
+
+        const msgParts: string[] = [];
+        msgParts.push(`Hey! You have an important email from ${senderName} about ${subject}.`);
+        if (hasDraft) {
+          msgParts.push(`I already prepared a draft reply.`);
+        }
+        if (calEvent) {
+          const evStartDate = new Date(calEvent.start_time);
+          const evStartTime = evStartDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+          msgParts.push(`I checked your Calendly and you're free tomorrow at ${evStartTime}.`);
+        }
+        msgParts.push(`Want me to read you the draft?`);
+        firstMessage = msgParts.join(" ");
+      }
+
+      console.log("[el-signed-url] startup context: %d apps, %d emails, %d drafts, %d slack msgs, %d cal events, %d chars, firstMessage: %d chars", activeApps.length, emails.length, draftMap.size, slackMessages.length, calEvents.length, startupContext.length, firstMessage.length);
+    } else {
+      console.warn("[el-signed-url] no DB client, skipping context");
+    }
+
+    res.json({ signedUrl, userId: authUser.id, startupContext, firstMessage, emailFeed });
+  } catch (err) {
+    console.error("[el-signed-url] error:", toErrorMessage(err));
+    res.status(500).json({ error: toErrorMessage(err) });
+  }
 });
 
 const httpServer = createServer(app);
@@ -1292,9 +1485,7 @@ function emitAgentReplyPartial(socket: Socket, text: string): void {
 }
 
 function emitEmailProcessingAck(socket: Socket, userText: string): void {
-  const ack = looksFrenchText(userText)
-    ? "D'accord, je vérifie ta boîte mail."
-    : "Got it. I am checking your inbox now.";
+  const ack = "Got it. I am checking your inbox now.";
   socket.emit(WS_EVENTS.AGENT_REPLY_PARTIAL, { text: ack } satisfies AgentReplyEvent);
   socket.emit(WS_EVENTS.AGENT_REPLY_FINAL, { text: ack } satisfies AgentReplyEvent);
   emitSttStatus(socket, {
@@ -1652,6 +1843,25 @@ function compactVoiceField(value: string, maxChars: number): string {
   return `${singleLine.slice(0, Math.max(0, maxChars - 15))}...(truncated)`;
 }
 
+function extractSenderName(fromAddress: string): string {
+  // "Pierre Dupont <pierre@example.com>" → "Pierre Dupont"
+  const nameMatch = fromAddress.match(/^([^<]+)</);
+  if (nameMatch?.[1]) {
+    return nameMatch[1].trim().replace(/^["']|["']$/g, "");
+  }
+  // "pierre@example.com" → "pierre"
+  const localMatch = fromAddress.match(/^([^@]+)/);
+  return localMatch?.[1]?.trim() ?? fromAddress;
+}
+
+function compactSubject(subject: string): string {
+  const cleaned = subject.replace(/^(re|fwd?):\s*/gi, "").trim();
+  if (cleaned.length <= 50) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, 47)}...`;
+}
+
 function isAbortError(err: unknown): boolean {
   if (err instanceof DOMException) {
     return err.name === "AbortError";
@@ -1680,3 +1890,17 @@ async function requireHttpAuth(req: Request, res: Response, next: NextFunction):
 httpServer.listen(env.port, () => {
   console.log(`server listening on http://localhost:${env.port}`);
 });
+
+// Composio → Supabase sync: initial + every 5 minutes
+if (!env.demoMode) {
+  composioSync.syncAllUsers().catch((err) => {
+    console.error("[composio-sync] initial sync error:", err);
+  });
+  setInterval(() => {
+    composioSync.syncAllUsers().catch((err) => {
+      console.error("[composio-sync] periodic sync error:", err);
+    });
+  }, 5 * 60 * 1000);
+} else {
+  console.info("[main] DEMO_MODE active: composio sync disabled");
+}

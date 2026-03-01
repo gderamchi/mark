@@ -16,6 +16,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@elevenlabs/react": "^0.14.1",
     "@mark/contracts": "workspace:*",
     "@supabase/supabase-js": "^2.98.0",
     "lamejsfixbug121": "^1.0.0",

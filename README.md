@@ -12,6 +12,8 @@ Flow:
 - Agent can auto-execute read tools.
 - Mutating tools create pending drafts and require explicit approval/rejection.
 - Approval loop supports iterative voice revisions.
+- Gmail triage supports relative windows such as `last hour` (mapped to `newer_than:1h`).
+- In Gmail triage mode, the agent can prepare draft-reply actions for approval directly from the selected email.
 
 ## Requirements
 
@@ -78,7 +80,8 @@ pnpm test
 ## Notes
 
 - Authentication is mandatory for action-capable sessions.
-- Conversation memory is in-memory and resets on server restart.
+- General chat memory remains in-memory and can reset on restart.
+- Gmail triage workflow memory (selection/draft/sent progress) is persisted locally in `apps/server/.runtime/email-workflows.json`.
 - Action/audit persistence is available when Supabase schema is applied.
 - TTS priority is Speechmatics first, then ElevenLabs fallback.
 - Real credentials should stay in `.env.local` only.

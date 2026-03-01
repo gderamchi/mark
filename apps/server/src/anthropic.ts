@@ -5,6 +5,46 @@ type Turn = {
   content: string;
 };
 
+export type EmailWorkflowDecisionAction =
+  | "pause"
+  | "summary"
+  | "choose_category"
+  | "show_current_email"
+  | "next_email"
+  | "draft_reply"
+  | "revise_draft"
+  | "send_reply"
+  | "handoff";
+
+export type EmailWorkflowDecisionCategory = "respond_needed" | "must_know";
+
+export type EmailWorkflowDecision = {
+  action: EmailWorkflowDecisionAction;
+  category: EmailWorkflowDecisionCategory | null;
+  draftInstruction: string | null;
+};
+
+export type EmailWorkflowDecisionContext = {
+  hasActiveWorkflow: boolean;
+  windowLabel: string | null;
+  counts: {
+    scanned: number;
+    respondNeeded: number;
+    mustKnow: number;
+    optional: number;
+    sent: number;
+  };
+  selectedCategory: EmailWorkflowDecisionCategory | null;
+  selectedIndex: number | null;
+  hasDraftForCurrentEmail: boolean;
+  currentEmail: {
+    from: string;
+    subject: string;
+    snippet: string;
+    category: EmailWorkflowDecisionCategory;
+  } | null;
+};
+
 export type AnthropicToolDefinition = {
   name: string;
   description: string;
@@ -45,6 +85,12 @@ type ReviseDraftResult = {
   args: Record<string, unknown>;
 };
 
+type DecideEmailWorkflowTurnParams = {
+  sessionId: string;
+  userText: string;
+  context: EmailWorkflowDecisionContext;
+};
+
 type AnthropicMessage = {
   role: "user" | "assistant";
   content: string | Array<Record<string, unknown>>;
@@ -76,6 +122,30 @@ export class AnthropicService {
 
   clearSession(sessionId: string): void {
     this.historyBySession.delete(sessionId);
+  }
+
+  async generateImmediateAck(userText: string): Promise<string> {
+    if (!this.env.anthropicApiKey) {
+      return fallbackImmediateAck(userText);
+    }
+
+    try {
+      const response = await this.callAnthropic({
+        model: this.env.anthropicModel,
+        max_tokens: 80,
+        system: getImmediateAckSystemPrompt(),
+        messages: [{ role: "user", content: userText }]
+      });
+
+      const text = normalizeImmediateAck(extractText(response));
+      if (text) {
+        return text;
+      }
+    } catch {
+      // Falls back below.
+    }
+
+    return fallbackImmediateAck(userText);
   }
 
   async generateReply(
@@ -249,6 +319,70 @@ export class AnthropicService {
     };
   }
 
+  async decideEmailWorkflowTurn(params: DecideEmailWorkflowTurnParams): Promise<EmailWorkflowDecision> {
+    if (!this.env.anthropicApiKey) {
+      return fallbackEmailWorkflowDecision(params.userText, params.context);
+    }
+
+    try {
+      const response = await this.callAnthropic({
+        model: this.env.anthropicModel,
+        max_tokens: 220,
+        temperature: 0,
+        system: getEmailWorkflowDecisionPrompt(),
+        messages: [
+          {
+            role: "user",
+            content: safeJson({
+              userText: params.userText,
+              context: params.context
+            })
+          }
+        ]
+      });
+      const raw = extractText(response);
+      const parsed = tryParseJson(raw);
+      return sanitizeEmailWorkflowDecision(parsed, params.userText, params.context);
+    } catch {
+      return fallbackEmailWorkflowDecision(params.userText, params.context);
+    }
+  }
+
+  async polishEmailWorkflowReply(userText: string, rawReply: string): Promise<string> {
+    const singleLine = rawReply.replace(/\s+/g, " ").trim();
+    if (!singleLine) {
+      return rawReply;
+    }
+    if (!this.env.anthropicApiKey) {
+      return singleLine;
+    }
+
+    try {
+      const response = await this.callAnthropic({
+        model: this.env.anthropicModel,
+        max_tokens: 180,
+        temperature: 0.2,
+        system: getEmailWorkflowPolishPrompt(),
+        messages: [
+          {
+            role: "user",
+            content: safeJson({
+              userText,
+              rawReply: singleLine
+            })
+          }
+        ]
+      });
+      const polished = extractText(response).replace(/\s+/g, " ").trim();
+      if (!polished) {
+        return singleLine;
+      }
+      return polished;
+    } catch {
+      return singleLine;
+    }
+  }
+
   private getHistory(sessionId: string): Turn[] {
     const turns = this.historyBySession.get(sessionId) ?? [];
     if (!this.historyBySession.has(sessionId)) {
@@ -324,6 +458,48 @@ function getToolSystemPrompt(): string {
     "For write/send/create/update/delete style tasks: still choose the correct tool and arguments.",
     "The execution layer will enforce approval for mutating actions.",
     "If the request is ambiguous between multiple apps, ask one short clarification question."
+  ].join(" ");
+}
+
+function getImmediateAckSystemPrompt(): string {
+  return [
+    "You produce only an immediate acknowledgement before a longer task runs.",
+    "Reply in the same language as the user.",
+    "Use one short sentence (maximum 22 words).",
+    "Confirm that you understood and that the user should wait while you work.",
+    "No markdown, no bullets, no extra commentary."
+  ].join(" ");
+}
+
+function getEmailWorkflowDecisionPrompt(): string {
+  return [
+    "You are the controller for an email triage voice workflow.",
+    "Return JSON only with this exact shape:",
+    '{"action":"pause|summary|choose_category|show_current_email|next_email|draft_reply|revise_draft|send_reply|handoff","category":"respond_needed|must_know|null","draftInstruction":"string|null"}',
+    "Interpret the user's latest message in context.",
+    "Decide only one best next action.",
+    "Use choose_category when user picks response-needed vs must-know.",
+    "Use show_current_email when user asks for details/current email.",
+    "Use next_email when user asks for next/continue/another.",
+    "Use draft_reply when user asks to draft/write/reply and there is no revision request.",
+    "Use revise_draft when user requests changes to an existing draft.",
+    "Use send_reply when user explicitly asks to send, or confirms positively while a draft exists for current email.",
+    "Use pause when user asks to stop/pause/cancel this flow.",
+    "Use summary when user asks for counts/recap/status.",
+    "Use handoff when user asks something unrelated to this email workflow.",
+    "If category is needed but not explicit, infer from context.",
+    "If draft action is chosen, set draftInstruction to a concise instruction based on the user request; otherwise null.",
+    "Do not include markdown or explanation."
+  ].join(" ");
+}
+
+function getEmailWorkflowPolishPrompt(): string {
+  return [
+    "You rewrite a server-produced email workflow response for natural voice conversation.",
+    "Output one to three short sentences in the same language as userText.",
+    "Preserve all concrete facts from rawReply: counts, categories, sender names, subject meaning, and outcomes.",
+    "Do not invent new facts, actions, tools, or dates.",
+    "Do not use markdown, bullets, or code fences."
   ].join(" ");
 }
 
@@ -406,6 +582,31 @@ function fallbackReply(userText: string): string {
   }
 
   return "I heard you. Could you add one more detail so I can give a sharper answer?";
+}
+
+function fallbackImmediateAck(userText: string): string {
+  if (looksFrench(userText)) {
+    return "D'accord, je m'en occupe. Veuillez patienter pendant que je traite la tâche.";
+  }
+  return "Got it. I am on it now. Please wait while I complete the task.";
+}
+
+function normalizeImmediateAck(value: string): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return "";
+  }
+
+  const words = cleaned.split(" ").slice(0, 22);
+  return words.join(" ");
+}
+
+function looksFrench(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return (
+    /[àâçéèêëîïôûùüÿœ]/.test(normalized) ||
+    /\b(je|tu|vous|nous|bonjour|merci|avec|pour|sur|dans|pas|oui|non|s'il|d'accord)\b/.test(normalized)
+  );
 }
 
 async function safeText(response: Response): Promise<string> {
@@ -531,4 +732,147 @@ function toErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function sanitizeEmailWorkflowDecision(
+  value: unknown,
+  userText: string,
+  context: EmailWorkflowDecisionContext
+): EmailWorkflowDecision {
+  if (!isObject(value)) {
+    return fallbackEmailWorkflowDecision(userText, context);
+  }
+
+  const action = sanitizeDecisionAction(typeof value.action === "string" ? value.action : "");
+  const rawCategory = typeof value.category === "string" ? value.category : null;
+  const category = sanitizeDecisionCategory(rawCategory, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow);
+  const draftInstruction =
+    typeof value.draftInstruction === "string" && value.draftInstruction.trim().length > 0
+      ? clampText(value.draftInstruction.trim(), 260)
+      : null;
+
+  return {
+    action,
+    category,
+    draftInstruction: action === "draft_reply" || action === "revise_draft" ? draftInstruction : null
+  };
+}
+
+function sanitizeDecisionAction(action: string): EmailWorkflowDecisionAction {
+  const allowed: EmailWorkflowDecisionAction[] = [
+    "pause",
+    "summary",
+    "choose_category",
+    "show_current_email",
+    "next_email",
+    "draft_reply",
+    "revise_draft",
+    "send_reply",
+    "handoff"
+  ];
+  return (allowed as string[]).includes(action) ? (action as EmailWorkflowDecisionAction) : "handoff";
+}
+
+function sanitizeDecisionCategory(
+  rawCategory: string | null,
+  selectedCategory: EmailWorkflowDecisionCategory | null,
+  respondNeededCount: number,
+  mustKnowCount: number
+): EmailWorkflowDecisionCategory | null {
+  if (rawCategory === "respond_needed" || rawCategory === "must_know") {
+    return rawCategory;
+  }
+  if (selectedCategory) {
+    return selectedCategory;
+  }
+  if (respondNeededCount > 0) {
+    return "respond_needed";
+  }
+  if (mustKnowCount > 0) {
+    return "must_know";
+  }
+  return null;
+}
+
+function fallbackEmailWorkflowDecision(
+  userText: string,
+  context: EmailWorkflowDecisionContext
+): EmailWorkflowDecision {
+  const normalized = userText.toLowerCase().trim();
+  if (!normalized) {
+    return {
+      action: "summary",
+      category: sanitizeDecisionCategory(null, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow),
+      draftInstruction: null
+    };
+  }
+
+  if (/\b(stop|cancel|pause|exit|arr[êe]te|annule)\b/.test(normalized)) {
+    return { action: "pause", category: null, draftInstruction: null };
+  }
+  if (/\b(summary|recap|counts?|how many|r[ée]sum[ée]|combien)\b/.test(normalized)) {
+    return { action: "summary", category: null, draftInstruction: null };
+  }
+  if (/\b(next|continue|another|move on|suivant|autre)\b/.test(normalized)) {
+    return {
+      action: "next_email",
+      category: sanitizeDecisionCategory(null, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow),
+      draftInstruction: null
+    };
+  }
+  if (/\b(send|envoie|envoyer|approve and send)\b/.test(normalized)) {
+    return {
+      action: "send_reply",
+      category: sanitizeDecisionCategory(null, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow),
+      draftInstruction: null
+    };
+  }
+  if (/\b(modify|change|edit|rewrite|revise|modifie|r[ée][ée]cris|plus court|plus long)\b/.test(normalized)) {
+    return {
+      action: "revise_draft",
+      category: sanitizeDecisionCategory(null, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow),
+      draftInstruction: userText
+    };
+  }
+  if (/\b(draft|compose|write|reply|brouillon|r[ée]dige|[ée]cris)\b/.test(normalized)) {
+    return {
+      action: "draft_reply",
+      category: sanitizeDecisionCategory(null, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow),
+      draftInstruction: userText
+    };
+  }
+  if (/^(yes|yeah|yep|sure|go ahead|do it|ok(?:ay)?|oui|vas[- ]?y|d'accord)\b/.test(normalized)) {
+    return {
+      action: context.hasDraftForCurrentEmail ? "send_reply" : "draft_reply",
+      category: sanitizeDecisionCategory(null, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow),
+      draftInstruction: context.hasDraftForCurrentEmail ? null : "Create the first draft."
+    };
+  }
+  if (/\b(response|respond|reply|r[ée]ponse|r[ée]pondre)\b/.test(normalized)) {
+    return {
+      action: "choose_category",
+      category: "respond_needed",
+      draftInstruction: null
+    };
+  }
+  if (/\b(must know|must-know|important|alerts?|critical|importantes?|critiques?)\b/.test(normalized)) {
+    return {
+      action: "choose_category",
+      category: "must_know",
+      draftInstruction: null
+    };
+  }
+  if (/\b(detail|details|donne les d[ée]tails|explique|show)\b/.test(normalized)) {
+    return {
+      action: "show_current_email",
+      category: sanitizeDecisionCategory(null, context.selectedCategory, context.counts.respondNeeded, context.counts.mustKnow),
+      draftInstruction: null
+    };
+  }
+
+  return {
+    action: "handoff",
+    category: null,
+    draftInstruction: null
+  };
 }

@@ -1,10 +1,4 @@
-import type { VoiceState } from "@mark/contracts";
-
 type VoiceTabProps = {
-  connected: boolean;
-  voiceState: VoiceState;
-  sttCode: string | null;
-  sessionId: string | null;
   isRunning: boolean;
   canResetMemory: boolean;
   userFinal: string;
@@ -18,10 +12,6 @@ type VoiceTabProps = {
 };
 
 export function VoiceTab({
-  connected,
-  voiceState,
-  sttCode,
-  sessionId,
   isRunning,
   canResetMemory,
   userFinal,
@@ -37,45 +27,23 @@ export function VoiceTab({
 
   return (
     <section className="tab-flow" aria-label="Voice Session">
-      <article className="card">
-        <h2>Session Snapshot</h2>
-        <dl className="status-grid compact-text">
-          <div>
-            <dt>Socket</dt>
-            <dd>{connected ? "connected" : "disconnected"}</dd>
-          </div>
-          <div>
-            <dt>State</dt>
-            <dd>{voiceState}</dd>
-          </div>
-          <div>
-            <dt>STT</dt>
-            <dd>{sttCode ?? "n/a"}</dd>
-          </div>
-          <div>
-            <dt>Session</dt>
-            <dd>{sessionId ?? "pending"}</dd>
-          </div>
-        </dl>
-      </article>
-
       <article className="card sticky-controls">
         <div className="control-row">
           {!isRunning ? (
-            <button className="btn btn-primary btn-large" onClick={onStart}>
+            <button className="btn btn-primary btn-large btn-main-action" onClick={onStart}>
               Start Listening
             </button>
           ) : (
-            <button className="btn btn-danger btn-large" onClick={onStop}>
+            <button className="btn btn-danger btn-large btn-main-action" onClick={onStop}>
               Stop Listening
             </button>
           )}
-          <button className="btn" onClick={onResetMemory} disabled={!canResetMemory}>
+          <button className="btn btn-compact" onClick={onResetMemory} disabled={!canResetMemory}>
             Reset Memory
           </button>
         </div>
         <p className="compact-text muted">
-          Read-only tools execute automatically. Mutating tools stay in draft until you approve or reject.
+          Read actions auto-run. Write actions require approval.
         </p>
         <div className="voice-meter-wrap" aria-live="off">
           <label htmlFor="voice-level">Mic level</label>
@@ -89,7 +57,7 @@ export function VoiceTab({
             <h2>Your Voice</h2>
             <p className="compact-text muted">Live transcript</p>
           </header>
-          <p className="final-text">{userFinal || "Speak to begin."}</p>
+          <p className="final-text scroll-body">{userFinal || "Speak to begin."}</p>
           <p className="partial-text">{userPartial || " "}</p>
         </article>
 
@@ -98,7 +66,7 @@ export function VoiceTab({
             <h2>Agent Voice</h2>
             <p className="compact-text muted">Live response</p>
           </header>
-          <p className="final-text">{agentFinal || "Waiting for your first prompt."}</p>
+          <p className="final-text scroll-body">{agentFinal || "Waiting for your first prompt."}</p>
           <p className="partial-text">{agentPartial || " "}</p>
         </article>
       </div>

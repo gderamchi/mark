@@ -5,6 +5,11 @@ export interface SessionStartedEvent {
   greeting: string;
 }
 
+export interface VoiceSessionSocketAuth {
+  accessToken: string;
+  timeZone?: string;
+}
+
 export type ApprovalSource = "voice" | "ui";
 export type ActionLifecycleStatus =
   | "idle"

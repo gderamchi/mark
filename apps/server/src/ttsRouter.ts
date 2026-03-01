@@ -37,34 +37,49 @@ export class TtsRouter {
     return timestamps[timestamps.length - 1] ?? null;
   }
 
-  async synthesizeWithPriority(text: string, onChunk: (payload: TtsChunk) => void): Promise<TtsSynthesisResult> {
+  async synthesizeWithPriority(
+    text: string,
+    onChunk: (payload: TtsChunk) => void,
+    signal?: AbortSignal
+  ): Promise<TtsSynthesisResult> {
     try {
-      const speechmaticsResult = await this.speechmaticsTts.synthesizeStream(text, (chunk, streamId) => {
-        onChunk({
-          chunk,
-          streamId,
-          provider: "speechmatics",
-          contentType: "audio/wav"
-        });
-      });
+      const speechmaticsResult = await this.speechmaticsTts.synthesizeStream(
+        text,
+        (chunk, streamId) => {
+          onChunk({
+            chunk,
+            streamId,
+            provider: "speechmatics",
+            contentType: "audio/wav"
+          });
+        },
+        signal
+      );
 
       return {
         streamId: speechmaticsResult.streamId,
         provider: "speechmatics",
         contentType: speechmaticsResult.contentType
       };
-    } catch {
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw err;
+      }
       // Fall through to ElevenLabs fallback
     }
 
-    const streamId = await this.elevenLabsTts.synthesizeStream(text, (chunk, id) => {
-      onChunk({
-        chunk,
-        streamId: id,
-        provider: "elevenlabs",
-        contentType: "audio/mpeg"
-      });
-    });
+    const streamId = await this.elevenLabsTts.synthesizeStream(
+      text,
+      (chunk, id) => {
+        onChunk({
+          chunk,
+          streamId: id,
+          provider: "elevenlabs",
+          contentType: "audio/mpeg"
+        });
+      },
+      signal
+    );
 
     return {
       streamId,
@@ -72,4 +87,15 @@ export class TtsRouter {
       contentType: "audio/mpeg"
     };
   }
+}
+
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException) {
+    return err.name === "AbortError";
+  }
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  const candidate = err as { name?: unknown; code?: unknown };
+  return candidate.name === "AbortError" || candidate.code === "ABORT_ERR";
 }

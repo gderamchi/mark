@@ -10,29 +10,22 @@ type TopBarProps = {
 export function TopBar({ session, userEmail, onSignIn, onSignOut }: TopBarProps) {
   return (
     <header className="topbar card" role="banner">
-      <div>
+      <div className="brand-block">
         <p className="eyebrow">Mark Agent</p>
-        <h1>Voice Action Runtime</h1>
+        <h1>Voice Assistant</h1>
       </div>
 
       {session ? (
-        <div className="topbar-actions">
-          <span className="status-badge" title={userEmail ?? "Authenticated"}>
+        <div className="topbar-actions account-block">
+          <p className="account-email" title={userEmail ?? "Authenticated user"}>
             {userEmail ?? "Signed in"}
-          </span>
-          <details className="overflow-menu">
-            <summary className="btn btn-ghost" aria-label="Open account menu">
-              Menu
-            </summary>
-            <div className="menu-panel">
-              <button className="btn" onClick={onSignOut}>
-                Sign out
-              </button>
-            </div>
-          </details>
+          </p>
+          <button className="btn btn-quiet" onClick={onSignOut}>
+            Sign out
+          </button>
         </div>
       ) : (
-        <button className="btn btn-primary" onClick={onSignIn}>
+        <button className="btn btn-primary btn-compact" onClick={onSignIn}>
           Sign In With Google
         </button>
       )}

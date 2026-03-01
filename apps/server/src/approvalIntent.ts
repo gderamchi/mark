@@ -15,7 +15,10 @@ const APPROVE_PATTERNS = [
   /\bconfirm\b/i,
   /\bthat's perfect\b/i,
   /\byes\b/i,
-  /\bok(?:ay)?\b/i
+  /\bok(?:ay)?\b/i,
+  /\boui\b/i,
+  /\bvas[- ]?y\b/i,
+  /\benvoie\b/i
 ];
 
 const REJECT_PATTERNS = [
@@ -27,7 +30,9 @@ const REJECT_PATTERNS = [
   /\bdo not send\b/i,
   /\bdon't send\b/i,
   /\bstop\b/i,
-  /\bno\b/i
+  /\bno\b/i,
+  /\bnon\b/i,
+  /\bannule\b/i
 ];
 
 const REVISE_PATTERNS = [
@@ -43,7 +48,11 @@ const REVISE_PATTERNS = [
   /\bmention\b/i,
   /\btone\b/i,
   /\bshorter\b/i,
-  /\blonger\b/i
+  /\blonger\b/i,
+  /\bmodifie\b/i,
+  /\br[ée][ée]cris?\b/i,
+  /\bplus court\b/i,
+  /\bplus long\b/i
 ];
 
 export class ApprovalIntentService {

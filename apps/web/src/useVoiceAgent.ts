@@ -20,12 +20,14 @@ import {
   type TtsAudioChunkEvent,
   type TtsAudioEndEvent,
   type TtsProvider,
+  type VoiceSessionSocketAuth,
   type VoiceState
 } from "@mark/contracts";
 
 import { MicrophonePipeline } from "./audio";
 import { encodePcmChunksToMp3Base64 } from "./mp3";
 import { StreamingTtsPlayer } from "./ttsPlayer";
+import { WaitingCuePlayer } from "./waitingCue";
 
 type VoiceHealth = {
   sttConfigured: boolean;
@@ -79,6 +81,8 @@ type VoiceAgentApi = VoiceAgentState & {
 };
 
 const SILENCE_THRESHOLD = 0.015;
+const INTERRUPT_THRESHOLD = 0.05;
+const INTERRUPT_HOLD_MS = 350;
 const SILENCE_COMMIT_MS = 900;
 const SAMPLE_RATE: 16000 = 16000;
 const PRE_ROLL_CHUNKS = 4;
@@ -106,11 +110,13 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
   const socketRef = useRef<Socket | null>(null);
   const micRef = useRef<MicrophonePipeline | null>(null);
   const playerRef = useRef<StreamingTtsPlayer | null>(null);
+  const waitingCueRef = useRef<WaitingCuePlayer | null>(null);
   const voiceStateRef = useRef<VoiceState>("idle");
   const smoothedLevelRef = useRef(0);
   const lastVoiceAtRef = useRef(0);
   const awaitingCommitRef = useRef(false);
   const speechDetectedRef = useRef(false);
+  const interruptVoiceStartedAtRef = useRef(0);
   const utteranceChunksRef = useRef<Int16Array[]>([]);
   const preRollRef = useRef<Int16Array[]>([]);
 
@@ -175,6 +181,36 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
     };
   }, [audioElement, connected]);
 
+  useEffect(() => {
+    const waitingCue = new WaitingCuePlayer();
+    waitingCueRef.current = waitingCue;
+
+    return () => {
+      waitingCue.dispose();
+      waitingCueRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const waitingCue = waitingCueRef.current;
+    if (!waitingCue) {
+      return;
+    }
+
+    const shouldPlayWaitingCue =
+      isRunning &&
+      connected &&
+      voiceState !== "speaking" &&
+      (voiceState === "thinking" || sttStatus?.code === "warming_up");
+
+    if (shouldPlayWaitingCue) {
+      waitingCue.start();
+      return;
+    }
+
+    waitingCue.stop();
+  }, [isRunning, connected, voiceState, sttStatus?.code]);
+
   const connectSocket = (): void => {
     if (socketRef.current) {
       return;
@@ -187,8 +223,9 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
     const socket = io(`${API_BASE_URL}/v1/session`, {
       transports: ["websocket"],
       auth: {
-        accessToken
-      }
+        accessToken,
+        timeZone: readBrowserTimeZone()
+      } satisfies VoiceSessionSocketAuth
     });
 
     socketRef.current = socket;
@@ -223,6 +260,9 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
       setSttStatus(payload);
       if (payload.code === "listening" && voiceStateRef.current !== "speaking") {
         setVoiceStateSafe("listening");
+      }
+      if (payload.code === "warming_up" && voiceStateRef.current !== "speaking") {
+        setVoiceStateSafe("thinking");
       }
       if (payload.code === "provider_error") {
         setError(payload.message);
@@ -336,7 +376,8 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
         return;
       }
 
-      if (voiceStateRef.current === "speaking" || voiceStateRef.current === "thinking") {
+      const currentState = voiceStateRef.current;
+      if (currentState === "thinking") {
         return;
       }
 
@@ -346,13 +387,19 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
       appendPreRoll(chunkCopy, preRollRef.current);
 
       const now = Date.now();
-      const hasVoice = smoothedLevelRef.current > SILENCE_THRESHOLD;
+      const isInterruptMode = currentState === "speaking";
+      const threshold = isInterruptMode ? INTERRUPT_THRESHOLD : SILENCE_THRESHOLD;
+      const hasVoice = smoothedLevelRef.current > threshold;
 
       if (hasVoice) {
         if (!speechDetectedRef.current) {
           speechDetectedRef.current = true;
           utteranceChunksRef.current = preRollRef.current.map((chunk) => new Int16Array(chunk));
-          setUserPartial("Listening...");
+          setUserPartial(isInterruptMode ? "Interrupting..." : "Listening...");
+        }
+
+        if (isInterruptMode && interruptVoiceStartedAtRef.current === 0) {
+          interruptVoiceStartedAtRef.current = now;
         }
         lastVoiceAtRef.current = now;
         awaitingCommitRef.current = true;
@@ -363,6 +410,16 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
       }
 
       if (
+        isInterruptMode &&
+        interruptVoiceStartedAtRef.current > 0 &&
+        now - interruptVoiceStartedAtRef.current >= INTERRUPT_HOLD_MS
+      ) {
+        playerRef.current?.stop();
+        waitingCueRef.current?.stop();
+        setVoiceStateSafe("listening");
+      }
+
+      if (
         awaitingCommitRef.current &&
         lastVoiceAtRef.current > 0 &&
         now - lastVoiceAtRef.current >= SILENCE_COMMIT_MS &&
@@ -370,6 +427,7 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
       ) {
         awaitingCommitRef.current = false;
         speechDetectedRef.current = false;
+        interruptVoiceStartedAtRef.current = 0;
         preRollRef.current = [];
         setUserPartial("");
         setVoiceStateSafe("thinking");
@@ -407,6 +465,7 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
     smoothedLevelRef.current = 0;
     lastVoiceAtRef.current = 0;
     speechDetectedRef.current = false;
+    interruptVoiceStartedAtRef.current = 0;
     utteranceChunksRef.current = [];
     preRollRef.current = [];
     setUserPartial("");
@@ -418,6 +477,7 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
     }
 
     playerRef.current?.stop();
+    waitingCueRef.current?.stop();
     setActiveTtsProvider(null);
     disconnectSocket();
     setVoiceStateSafe("idle");
@@ -566,5 +626,14 @@ function appendPreRoll(chunk: Int16Array, target: Int16Array[]): void {
   target.push(chunk);
   while (target.length > PRE_ROLL_CHUNKS) {
     target.shift();
+  }
+}
+
+function readBrowserTimeZone(): string | undefined {
+  try {
+    const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof resolved === "string" && resolved.length > 0 ? resolved : undefined;
+  } catch {
+    return undefined;
   }
 }

@@ -16,7 +16,8 @@ export class ElevenLabsService {
 
   async synthesizeStream(
     text: string,
-    onChunk: (chunk: Buffer, streamId: string) => void
+    onChunk: (chunk: Buffer, streamId: string) => void,
+    signal?: AbortSignal
   ): Promise<string> {
     const streamId = `tts-${Date.now()}`;
 
@@ -27,6 +28,7 @@ export class ElevenLabsService {
 
     const response = await fetch(`${this.baseUrl}/text-to-speech/${this.env.elevenLabsVoiceId}/stream`, {
       method: "POST",
+      signal,
       headers: {
         "content-type": "application/json",
         accept: "audio/mpeg",
@@ -54,6 +56,9 @@ export class ElevenLabsService {
     const reader = response.body.getReader();
 
     while (true) {
+      if (signal?.aborted) {
+        throw new DOMException("ElevenLabs TTS aborted", "AbortError");
+      }
       const { done, value } = await reader.read();
       if (done) {
         break;

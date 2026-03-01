@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 
 import type {
@@ -9,21 +9,14 @@ import type {
   ComposioConnectLinkResponse
 } from "@mark/contracts";
 
-import { ActionsTab } from "./components/ActionsTab";
-import { BottomNav } from "./components/BottomNav";
 import { StatusAlerts } from "./components/StatusAlerts";
 import { TopBar } from "./components/TopBar";
 import type { ProviderDiagnosticItem } from "./components/types";
-import { VoiceTab } from "./components/VoiceTab";
-import { useUiDensityMode } from "./hooks/useUiDensityMode";
+import { VoiceStage } from "./components/VoiceStage";
 import { supabase } from "./supabase";
 import type { CatalogListItem } from "./tabs/AppsTab";
 import type { TimelineViewItem } from "./tabs/TimelineTab";
-import type { DesktopTabId, MobileTabId } from "./uiTypes";
 import { useVoiceAgent } from "./useVoiceAgent";
-
-const AppsTab = lazy(() => import("./tabs/AppsTab"));
-const TimelineTab = lazy(() => import("./tabs/TimelineTab"));
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 
@@ -39,12 +32,9 @@ export function App() {
   const [connectingAuthConfigId, setConnectingAuthConfigId] = useState<string | null>(null);
   const [connectedBanner, setConnectedBanner] = useState<string | null>(null);
   const [pendingConnectionRefresh, setPendingConnectionRefresh] = useState(false);
-  const [mobileTab, setMobileTab] = useState<MobileTabId>("voice");
-  const [desktopTab, setDesktopTab] = useState<DesktopTabId>("actions");
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const accessToken = session?.access_token ?? null;
-  const uiDensityMode = useUiDensityMode();
 
   const agent = useVoiceAgent(audioRef.current, accessToken);
 
@@ -286,168 +276,81 @@ export function App() {
     }
   };
 
-  const isDesktop = uiDensityMode === "desktop";
-
-  const renderActionsTab = () => {
-    return (
-      <ActionsTab
-        pendingAction={agent.pendingAction}
-        onApprovePending={agent.approvePending}
-        onRejectPending={() => agent.rejectPending("Rejected from UI.")}
-        actionStatusMessage={agent.actionStatus?.message ?? null}
-        sttMessage={agent.sttStatus?.message ?? null}
-        activeTtsProvider={agent.activeTtsProvider}
-        providerDiagnostics={providerDiagnostics}
-      />
-    );
-  };
-
-  const renderAppsTab = () => {
-    return (
-      <Suspense fallback={<TabLoading label="Loading app catalog..." />}>
-        <AppsTab
-          loading={loadingCatalog}
-          search={catalogSearch}
-          onSearchChange={setCatalogSearch}
-          items={catalogList}
-          connectingAuthConfigId={connectingAuthConfigId}
-          onConnect={(authConfigId) => {
-            void connectApp(authConfigId);
-          }}
-        />
-      </Suspense>
-    );
-  };
-
-  const renderTimelineTab = () => {
-    return (
-      <Suspense fallback={<TabLoading label="Loading timeline..." />}>
-        <TimelineTab sourceLabel={timelineView.sourceLabel} items={timelineView.items} />
-      </Suspense>
-    );
-  };
-
   return (
     <div className="page">
       <main className="shell">
-        <TopBar
-          session={session}
-          userEmail={user?.email ?? null}
-          onSignIn={() => {
-            void signInWithGoogle();
-          }}
-          onSignOut={() => {
-            void signOut();
-          }}
-        />
-
         {!session ? (
-          <section className="auth-guard card">
-            <h2>Authentication Required</h2>
-            <p>
-              Sign in to unlock voice actions, app connections, and approval-gated execution. Voice loops remain protected
-              by Supabase access tokens.
-            </p>
-            <button
-              className="btn btn-primary"
-              onClick={() => {
+          <>
+            <TopBar
+              session={session}
+              userEmail={user?.email ?? null}
+              onSignIn={() => {
                 void signInWithGoogle();
               }}
-            >
-              Continue With Google
-            </button>
-            {!supabase ? <p className="alert alert-error">Missing `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY`.</p> : null}
-          </section>
+              onSignOut={() => {
+                void signOut();
+              }}
+            />
+            <section className="auth-guard card">
+              <h2>Authentication Required</h2>
+              <p>
+                Sign in to unlock voice actions, app connections, and approval-gated execution. Voice loops remain protected
+                by Supabase access tokens.
+              </p>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  void signInWithGoogle();
+                }}
+              >
+                Continue With Google
+              </button>
+              {!supabase ? <p className="alert alert-error">Missing `VITE_SUPABASE_URL` or `VITE_SUPABASE_ANON_KEY`.</p> : null}
+            </section>
+          </>
         ) : (
           <>
             <StatusAlerts connectedBanner={connectedBanner} errorMessage={agent.error ?? error} />
-
-            {isDesktop ? (
-              <section className="desktop-grid" aria-label="Main Workspace">
-                <div className="desktop-primary">
-                  <VoiceTab
-                    connected={agent.connected}
-                    voiceState={agent.voiceState}
-                    sttCode={agent.sttStatus?.code ?? null}
-                    sessionId={agent.sessionId}
-                    isRunning={agent.isRunning}
-                    canResetMemory={agent.connected}
-                    userFinal={agent.userFinal}
-                    userPartial={agent.userPartial}
-                    agentFinal={agent.agentFinal}
-                    agentPartial={agent.agentPartial}
-                    audioLevel={agent.audioLevel}
-                    onStart={() => {
-                      void agent.start();
-                    }}
-                    onStop={() => {
-                      void agent.stop();
-                    }}
-                    onResetMemory={agent.resetMemory}
-                  />
-                </div>
-
-                <aside className="desktop-secondary">
-                  <nav className="segmented-nav" aria-label="Secondary tabs">
-                    <button
-                      className={`segmented-nav-item ${desktopTab === "actions" ? "is-active" : ""}`}
-                      onClick={() => setDesktopTab("actions")}
-                    >
-                      Actions
-                    </button>
-                    <button
-                      className={`segmented-nav-item ${desktopTab === "apps" ? "is-active" : ""}`}
-                      onClick={() => setDesktopTab("apps")}
-                    >
-                      Apps
-                    </button>
-                    <button
-                      className={`segmented-nav-item ${desktopTab === "timeline" ? "is-active" : ""}`}
-                      onClick={() => setDesktopTab("timeline")}
-                    >
-                      Timeline
-                    </button>
-                  </nav>
-
-                  {desktopTab === "actions" ? renderActionsTab() : null}
-                  {desktopTab === "apps" ? renderAppsTab() : null}
-                  {desktopTab === "timeline" ? renderTimelineTab() : null}
-                </aside>
-              </section>
-            ) : (
-              <section className="mobile-layout" aria-label="Main Workspace">
-                <div className="mobile-content">
-                  {mobileTab === "voice" ? (
-                    <VoiceTab
-                      connected={agent.connected}
-                      voiceState={agent.voiceState}
-                      sttCode={agent.sttStatus?.code ?? null}
-                      sessionId={agent.sessionId}
-                      isRunning={agent.isRunning}
-                      canResetMemory={agent.connected}
-                      userFinal={agent.userFinal}
-                      userPartial={agent.userPartial}
-                      agentFinal={agent.agentFinal}
-                      agentPartial={agent.agentPartial}
-                      audioLevel={agent.audioLevel}
-                      onStart={() => {
-                        void agent.start();
-                      }}
-                      onStop={() => {
-                        void agent.stop();
-                      }}
-                      onResetMemory={agent.resetMemory}
-                    />
-                  ) : null}
-
-                  {mobileTab === "actions" ? renderActionsTab() : null}
-                  {mobileTab === "apps" ? renderAppsTab() : null}
-                  {mobileTab === "timeline" ? renderTimelineTab() : null}
-                </div>
-
-                <BottomNav activeTab={mobileTab} onSelectTab={setMobileTab} />
-              </section>
-            )}
+            <VoiceStage
+              connected={agent.connected}
+              isRunning={agent.isRunning}
+              voiceState={agent.voiceState}
+              audioLevel={agent.audioLevel}
+              sessionId={agent.sessionId}
+              userPartial={agent.userPartial}
+              userFinal={agent.userFinal}
+              agentPartial={agent.agentPartial}
+              agentFinal={agent.agentFinal}
+              pendingAction={agent.pendingAction}
+              actionStatus={agent.actionStatus}
+              actionTimeline={agent.actionTimeline}
+              sttMessage={agent.sttStatus?.message ?? null}
+              actionStatusMessage={agent.actionStatus?.message ?? null}
+              activeTtsProvider={agent.activeTtsProvider}
+              providerDiagnostics={providerDiagnostics}
+              onStart={() => {
+                void agent.start();
+              }}
+              onStop={() => {
+                void agent.stop();
+              }}
+              onResetMemory={agent.resetMemory}
+              onSignOut={() => {
+                void signOut();
+              }}
+              onApprovePending={agent.approvePending}
+              onRejectPending={() => agent.rejectPending("Rejected from notification card.")}
+              loadingApps={loadingCatalog}
+              appsSearch={catalogSearch}
+              onAppsSearchChange={setCatalogSearch}
+              appsItems={catalogList}
+              connectingAuthConfigId={connectingAuthConfigId}
+              onConnectApp={(authConfigId) => {
+                void connectApp(authConfigId);
+              }}
+              timelineSourceLabel={timelineView.sourceLabel}
+              timelineItems={timelineView.items}
+            />
           </>
         )}
       </main>
@@ -486,10 +389,6 @@ export function App() {
       // Keep last successful snapshot.
     }
   }
-}
-
-function TabLoading({ label }: { label: string }) {
-  return <p className="compact-text muted">{label}</p>;
 }
 
 async function authedFetch<T>(path: string, accessToken: string, init?: RequestInit): Promise<T> {

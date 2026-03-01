@@ -15,7 +15,8 @@ export class SpeechmaticsTtsService {
 
   async synthesizeStream(
     text: string,
-    onChunk: (chunk: Buffer, streamId: string) => void
+    onChunk: (chunk: Buffer, streamId: string) => void,
+    signal?: AbortSignal
   ): Promise<{ streamId: string; contentType: "audio/wav" }> {
     const streamId = `tts-sm-${Date.now()}`;
 
@@ -32,6 +33,7 @@ export class SpeechmaticsTtsService {
     const url = `${this.env.speechmaticsTtsBaseUrl}/generate/${encodeURIComponent(this.env.speechmaticsTtsVoice)}?output_format=${this.env.speechmaticsTtsOutputFormat}`;
     const response = await fetch(url, {
       method: "POST",
+      signal,
       headers: {
         Authorization: `Bearer ${this.env.speechmaticsApiKey}`,
         "content-type": "application/json"
@@ -49,6 +51,9 @@ export class SpeechmaticsTtsService {
 
     const reader = response.body.getReader();
     while (true) {
+      if (signal?.aborted) {
+        throw new DOMException("Speechmatics TTS aborted", "AbortError");
+      }
       const { done, value } = await reader.read();
       if (done) {
         break;

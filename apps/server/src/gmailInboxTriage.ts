@@ -481,10 +481,10 @@ function classifyEmailFallback(email: CompactEmail): EmailPriorityDecision {
     };
   }
 
-  if (isStrongRespondNeeded(haystack, sender) || isModerateRespondNeeded(haystack, sender)) {
+  if (isStrongRespondNeeded(haystack, sender)) {
     return {
       category: "respond_needed",
-      reason: "Likely requests a direct response with meaningful follow-up."
+      reason: "Contains an explicit request for a response, decision, or confirmation."
     };
   }
 
@@ -556,53 +556,39 @@ function isStrongRespondNeeded(haystack: string, sender: string): boolean {
   const explicitSignals = [
     "please reply",
     "please respond",
+    "reply needed",
     "response needed",
-    "action required",
-    "approval needed",
     "let me know",
     "can you",
     "could you",
     "would you",
-    "follow up",
-    "follow-up",
     "rsvp",
     "your feedback",
     "need your input",
     "are you available",
     "what do you think",
-    "does this work for you"
+    "does this work for you",
+    "are you interested",
+    "if you are interested",
+    "please confirm",
+    "confirm if",
+    "need your decision",
+    "please approve",
+    "can we",
+    "could we",
+    "shall we"
   ];
 
-  return explicitSignals.some((signal) => haystack.includes(signal));
-}
-
-function isModerateRespondNeeded(haystack: string, sender: string): boolean {
-  if (isLikelyAutomatedSender(sender)) {
-    return false;
-  }
-
-  const workSignals = [
-    "proposal",
-    "work with",
-    "opportunity",
-    "partnership",
-    "interview",
-    "meeting request",
-    "contract",
-    "quote request",
-    "estimate request",
-    "project brief",
-    "client",
-    "collaboration",
-    "consulting",
-    "next steps"
-  ];
-
-  if (workSignals.some((signal) => haystack.includes(signal))) {
+  if (explicitSignals.some((signal) => haystack.includes(signal))) {
     return true;
   }
 
-  if (/(\bre:|\bfwd:|\bfw:)/.test(haystack) && /\b(question|feedback|availability|schedule|next steps)\b/.test(haystack)) {
+  if (
+    /\?/.test(haystack) &&
+    /\b(can you|could you|would you|are you|will you|do you|should we|can we|could we|shall we|interested|available|confirm|approve|reply)\b/.test(
+      haystack
+    )
+  ) {
     return true;
   }
 
@@ -621,13 +607,7 @@ function shouldPromoteOptionalToRespondNeeded(email: CompactEmail): boolean {
   const snippet = email.snippet.toLowerCase();
   const haystack = `${subject} ${sender} ${snippet}`;
 
-  if (isStrongRespondNeeded(haystack, sender)) {
-    return true;
-  }
-  if (isModerateRespondNeeded(haystack, sender) && hasDirectResponseAskCue(haystack)) {
-    return true;
-  }
-  return false;
+  return isStrongRespondNeeded(haystack, sender) && hasDirectResponseAskCue(haystack);
 }
 
 function sanitizeCategory(category: TriagedEmailCategory | string): TriagedEmailCategory {

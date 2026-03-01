@@ -114,7 +114,7 @@ export class GmailPriorityLlmClassifier implements EmailPriorityClassifier {
           '{"items":[{"id":"...","category":"respond_needed|must_know|optional","reason":"short reason"}]}',
           "Classification policy:",
           "- must_know: only urgent, high-impact risk where missing it could cause harm or loss (security breach, payment failure on critical account, legal/compliance deadline, account lockout, severe service incident).",
-          "- respond_needed: the sender is clearly expecting a response/decision and replying would provide meaningful user value.",
+          "- respond_needed: only when there is a clear, explicit ask for a response, decision, approval, confirmation, availability, or a direct question that requires a reply.",
           "- optional: everything else (newsletters, promos, digests, verification/welcome emails, routine invitations, low-context outreach, generic notifications).",
           "Prioritize precision over recall: false positives are worse than false negatives.",
           "must_know must be rare. In a normal inbox this is usually a small minority.",
@@ -122,8 +122,8 @@ export class GmailPriorityLlmClassifier implements EmailPriorityClassifier {
           "If uncertain between respond_needed and optional, choose optional.",
           "Use semantic cues in any language (not only English).",
           "An email verification code, signup confirmation, or routine invitation is optional unless there is explicit urgent impact.",
-          "A work proposal, recruiting message, interview process step, or direct business inquiry is usually respond_needed, not must_know.",
-          "Do not classify generic cold outreach as respond_needed unless there is a concrete ask, clear relevance, or clear next step.",
+          "A work proposal, recruiting message, interview process step, or direct business inquiry is optional unless it explicitly asks the user to reply or decide.",
+          "Do not classify generic cold outreach as respond_needed unless there is a concrete explicit ask for a reply.",
           "Do not rely on senderKind alone: automated platform senders can still contain response-worthy opportunities."
         ].join(" "),
         messages: [

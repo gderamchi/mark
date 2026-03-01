@@ -182,6 +182,70 @@ describe("GmailInboxTriageService", () => {
     assert.equal(result.optionalCount, 0);
     assert.equal(result.decisionAudit[0]?.source, "llm_promoted");
   });
+
+  it("keeps non-explicit business outreach as optional when classifier is unavailable", async () => {
+    const messages: MockMessage[] = [
+      {
+        id: "m5",
+        threadId: "t5",
+        sender: "Partnership Team <hello@partner.co>",
+        subject: "Partnership opportunity",
+        snippet: "Sharing our company overview and recent deck for context.",
+        labelIds: ["UNREAD", "INBOX", "CATEGORY_PERSONAL"]
+      }
+    ];
+
+    const classifier: EmailPriorityClassifier = {
+      isConfigured: () => false,
+      classify: async () => ({})
+    };
+
+    const service = new GmailInboxTriageService(createMockComposio(messages), classifier);
+    const result = await service.triageInbox({
+      composioUserId: "user-1",
+      toolsByName: createGmailTools(),
+      resolvedQuery: "newer_than:2h label:inbox is:unread",
+      windowLabel: "the last 2 hours",
+      timeZone: "Europe/Paris"
+    });
+
+    assert.equal(result.respondNeeded.length, 0);
+    assert.equal(result.mustKnow.length, 0);
+    assert.equal(result.optionalCount, 1);
+    assert.equal(result.decisionAudit[0]?.source, "fallback");
+  });
+
+  it("classifies explicit reply asks as respond_needed when classifier is unavailable", async () => {
+    const messages: MockMessage[] = [
+      {
+        id: "m6",
+        threadId: "t6",
+        sender: "Hiring Team <hello@company.com>",
+        subject: "Interview scheduling",
+        snippet: "Could you share your availability for a 20-minute call next week?",
+        labelIds: ["UNREAD", "INBOX", "CATEGORY_PERSONAL"]
+      }
+    ];
+
+    const classifier: EmailPriorityClassifier = {
+      isConfigured: () => false,
+      classify: async () => ({})
+    };
+
+    const service = new GmailInboxTriageService(createMockComposio(messages), classifier);
+    const result = await service.triageInbox({
+      composioUserId: "user-1",
+      toolsByName: createGmailTools(),
+      resolvedQuery: "newer_than:2h label:inbox is:unread",
+      windowLabel: "the last 2 hours",
+      timeZone: "Europe/Paris"
+    });
+
+    assert.equal(result.respondNeeded.length, 1);
+    assert.equal(result.respondNeeded[0]?.id, "m6");
+    assert.equal(result.optionalCount, 0);
+    assert.equal(result.decisionAudit[0]?.source, "fallback");
+  });
 });
 
 function createGmailTools(): Record<string, AgentToolDefinition> {

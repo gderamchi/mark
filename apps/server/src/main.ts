@@ -40,6 +40,7 @@ import { ApprovalIntentService } from "./approvalIntent.js";
 import { AuthError, AuthService, getBearerToken, type AuthenticatedUser } from "./auth.js";
 import { AuditService } from "./audit.js";
 import { ComposioService, type AgentToolDefinition } from "./composio.js";
+import { buildDemoFictionalReplyDraft } from "./demoDraft.js";
 import { EmailIntentRouter, type EmailIntent, normalizeTimeZone } from "./emailIntentRouter.js";
 import { ElevenLabsService } from "./elevenlabs.js";
 import { ElevenLabsSttService } from "./elevenlabsStt.js";
@@ -416,6 +417,7 @@ async function handleUserUtterance(socket: Socket, payload: AudioUserUtteranceEv
   const runId = state.processingRunId + 1;
   state.processingRunId = runId;
   state.processing = true;
+  let shouldResumeListening = false;
 
   emitSttStatus(socket, {
     code: "warming_up",
@@ -434,6 +436,7 @@ async function handleUserUtterance(socket: Socket, payload: AudioUserUtteranceEv
     }
 
     await processFinalTranscript(socket, transcript);
+    shouldResumeListening = true;
   } catch (err) {
     console.error("[voice][stt] utterance processing failed", {
       sessionId: socket.id,
@@ -448,6 +451,12 @@ async function handleUserUtterance(socket: Socket, payload: AudioUserUtteranceEv
   } finally {
     if (state.processingRunId === runId) {
       state.processing = false;
+      if (shouldResumeListening) {
+        emitSttStatus(socket, {
+          code: "listening",
+          message: "Listening for your request."
+        });
+      }
     }
   }
 }
@@ -694,6 +703,17 @@ async function handleEmailConversationTurn(socket: Socket, state: SessionState, 
     return null;
   }
 
+  const directAction = detectDirectEmailWorkflowAction(text, Boolean(state.emailConversation.lastDraft));
+  if (directAction === "send_reply") {
+    return prepareReplyActionForCurrentEmail(socket, state, text, { autoExecute: true });
+  }
+  if (directAction === "draft_reply") {
+    return generateReplyDraftForCurrentEmail(state, text);
+  }
+  if (directAction === "revise_draft") {
+    return generateReplyDraftForCurrentEmail(state, `Revise the previous draft based on: ${text}`);
+  }
+
   const decision = await llm.decideEmailWorkflowTurn({
     sessionId: socket.id,
     userText: text,
@@ -730,11 +750,11 @@ async function handleEmailConversationTurn(socket: Socket, state: SessionState, 
     }
     case "draft_reply": {
       const instruction = decision.draftInstruction?.trim() || "Create the first draft.";
-      return generateReplyDraftForCurrentEmail(socket.id, state, instruction);
+      return generateReplyDraftForCurrentEmail(state, instruction);
     }
     case "revise_draft": {
       const instruction = decision.draftInstruction?.trim() || `Revise the previous draft based on: ${text}`;
-      return generateReplyDraftForCurrentEmail(socket.id, state, instruction);
+      return generateReplyDraftForCurrentEmail(state, instruction);
     }
     case "send_reply": {
       rawReply = await prepareReplyActionForCurrentEmail(socket, state, text, { autoExecute: true });
@@ -867,36 +887,52 @@ function buildCurrentEmailDetails(state: SessionState, category: EmailFocusCateg
   );
 }
 
-async function generateReplyDraftForCurrentEmail(sessionId: string, state: SessionState, instruction: string): Promise<string> {
+async function generateReplyDraftForCurrentEmail(state: SessionState, instruction: string): Promise<string> {
   const email = getCurrentConversationEmail(state);
   if (!email) {
     return "Select an email first by saying response-needed or must-know.";
   }
 
-  const prompt = [
-    "Draft a concise email reply body only, no markdown and no extra commentary.",
-    "Keep it clear, polite, and actionable.",
-    "If the message asks for a decision, provide a direct and useful response.",
-    `Instruction: ${instruction}`,
-    `From: ${email.from}`,
-    `Subject: ${email.subject}`,
-    `Snippet: ${email.snippet || "(none)"}`,
-    state.emailConversation.lastDraft ? `Previous draft: ${state.emailConversation.lastDraft}` : ""
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  let draft = "";
-  try {
-    draft = await llm.generateReply(sessionId, prompt, () => undefined);
-  } catch {
-    return "I could not draft a reply right now. Please try again.";
-  }
+  const draft = buildDemoFictionalReplyDraft({
+    email: {
+      id: email.id,
+      from: email.from,
+      subject: email.subject,
+      snippet: email.snippet || ""
+    },
+    instruction
+  });
 
   const cleanDraft = compactVoiceField(draft, EMAIL_REPLY_DRAFT_MAX_CHARS);
   state.emailConversation.lastDraft = cleanDraft;
   persistEmailDraftInWorkflow(state, email.id, cleanDraft, instruction);
-  return `${cleanDraft} Does this draft look good? If yes, I can send it now.`;
+  return `${cleanDraft}\n\nDemo draft prepared with fictional numbers. Say "send it" to execute, or tell me what to revise.`;
+}
+
+function detectDirectEmailWorkflowAction(
+  userText: string,
+  hasExistingDraft: boolean
+): "send_reply" | "draft_reply" | "revise_draft" | null {
+  const normalized = userText.toLowerCase();
+
+  const sendPattern =
+    /\b(send|approve|approved|go ahead|looks good|look good|ship it|send it|yes send|envoie|envoyer|vas-y|c'est bon)\b/i;
+  if (hasExistingDraft && sendPattern.test(normalized)) {
+    return "send_reply";
+  }
+
+  const revisePattern =
+    /\b(revise|change|edit|update|rewrite|reword|shorter|longer|tone|adjust|modifie|modifier|corrige|corriger)\b/i;
+  if (hasExistingDraft && revisePattern.test(normalized)) {
+    return "revise_draft";
+  }
+
+  const draftPattern = /\b(draft|compose|write|reply|brouillon|redige|rédige|ecris|écris)\b/i;
+  if (draftPattern.test(normalized)) {
+    return hasExistingDraft ? "revise_draft" : "draft_reply";
+  }
+
+  return null;
 }
 
 async function prepareReplyActionForCurrentEmail(
@@ -912,7 +948,7 @@ async function prepareReplyActionForCurrentEmail(
 
   let draftText = state.emailConversation.lastDraft;
   if (!draftText) {
-    const draftResult = await generateReplyDraftForCurrentEmail(socket.id, state, "Create the first draft.");
+    const draftResult = await generateReplyDraftForCurrentEmail(state, "Create the first draft.");
     draftText = state.emailConversation.lastDraft;
     if (!draftText) {
       return draftResult;

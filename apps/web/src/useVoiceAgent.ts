@@ -32,6 +32,11 @@ import { WaitingCuePlayer } from "./waitingCue";
 
 type VoiceHealth = {
   sttConfigured: boolean;
+  sttProviders?: {
+    speechmaticsConfigured: boolean;
+    elevenLabsConfigured: boolean;
+    priority: Array<"speechmatics" | "elevenlabs">;
+  };
   ttsConfigured: boolean;
   ttsProviders?: {
     speechmaticsConfigured: boolean;
@@ -86,7 +91,7 @@ type VoiceAgentApi = VoiceAgentState & {
 const SILENCE_THRESHOLD = 0.015;
 const INTERRUPT_THRESHOLD = 0.05;
 const INTERRUPT_HOLD_MS = 350;
-const SILENCE_COMMIT_MS = 700;
+const SILENCE_COMMIT_MS = 900;
 const SAMPLE_RATE: 16000 = 16000;
 const PRE_ROLL_CHUNKS = 4;
 
@@ -125,6 +130,9 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
   const interruptVoiceStartedAtRef = useRef(0);
   const utteranceChunksRef = useRef<Int16Array[]>([]);
   const preRollRef = useRef<Int16Array[]>([]);
+  const agentFinalRef = useRef("");
+  const pendingTtsFallbackTimerRef = useRef<number | null>(null);
+  const receivedTtsForCurrentReplyRef = useRef(false);
 
   const setVoiceStateSafe = (next: VoiceState): void => {
     voiceStateRef.current = next;
@@ -159,6 +167,37 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
   useEffect(() => {
     voiceStateRef.current = voiceState;
   }, [voiceState]);
+
+  useEffect(() => {
+    agentFinalRef.current = agentFinal;
+  }, [agentFinal]);
+
+  const clearPendingTtsFallback = (): void => {
+    if (pendingTtsFallbackTimerRef.current == null) {
+      return;
+    }
+    window.clearTimeout(pendingTtsFallbackTimerRef.current);
+    pendingTtsFallbackTimerRef.current = null;
+  };
+
+  const scheduleTtsFallback = (text: string): void => {
+    clearPendingTtsFallback();
+    receivedTtsForCurrentReplyRef.current = false;
+    pendingTtsFallbackTimerRef.current = window.setTimeout(() => {
+      pendingTtsFallbackTimerRef.current = null;
+      if (receivedTtsForCurrentReplyRef.current) {
+        return;
+      }
+      speakFallback(text);
+      setSttStatus({
+        code: "listening",
+        message: "Listening for your request."
+      });
+      if (voiceStateRef.current !== "speaking") {
+        setVoiceStateSafe("listening");
+      }
+    }, 2200);
+  };
 
   useEffect(() => {
     void fetch(buildApiUrl(API_BASE_URL, "/health/voice"))
@@ -306,9 +345,12 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
       if (voiceStateRef.current !== "speaking") {
         setVoiceStateSafe("thinking");
       }
+      scheduleTtsFallback(payload.text);
     });
 
     socket.on(WS_EVENTS.TTS_AUDIO_CHUNK, (payload: TtsAudioChunkEvent) => {
+      receivedTtsForCurrentReplyRef.current = true;
+      clearPendingTtsFallback();
       setActiveTtsProvider(payload.provider);
       playerRef.current?.enqueueChunk(payload.streamId, payload.chunkBase64, payload.contentType);
     });
@@ -351,6 +393,17 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
 
     socket.on(WS_EVENTS.ERROR_RAISED, (payload: { message: string }) => {
       setError(payload.message);
+      if (payload.message.toLowerCase().startsWith("tts failed:")) {
+        speakFallback(agentFinalRef.current);
+        setSttStatus({
+          code: "listening",
+          message: "Listening for your request."
+        });
+        if (voiceStateRef.current !== "speaking") {
+          setVoiceStateSafe("listening");
+        }
+        return;
+      }
       if (voiceStateRef.current !== "speaking") {
         setVoiceStateSafe("idle");
       }
@@ -367,6 +420,8 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
     socket.disconnect();
     socketRef.current = null;
     setConnected(false);
+    clearPendingTtsFallback();
+    receivedTtsForCurrentReplyRef.current = false;
   };
 
   const start = async (): Promise<void> => {
@@ -495,6 +550,8 @@ export function useVoiceAgent(audioElement: HTMLAudioElement | null, accessToken
 
     playerRef.current?.stop();
     waitingCueRef.current?.stop();
+    clearPendingTtsFallback();
+    receivedTtsForCurrentReplyRef.current = false;
     setActiveTtsProvider(null);
     disconnectSocket();
     setVoiceStateSafe("idle");
@@ -697,5 +754,29 @@ function readBrowserTimeZone(): string | undefined {
     return typeof resolved === "string" && resolved.length > 0 ? resolved : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function speakFallback(text: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const clean = text.trim();
+  if (!clean) {
+    return;
+  }
+
+  const synth = window.speechSynthesis;
+  const Utterance = window.SpeechSynthesisUtterance;
+  if (!synth || typeof Utterance !== "function") {
+    return;
+  }
+
+  try {
+    synth.cancel();
+    synth.speak(new Utterance(clean));
+  } catch {
+    // Ignore browser TTS fallback errors.
   }
 }

@@ -5,7 +5,7 @@ import type { ActionDraft, ActionStatusEvent, VoiceState } from "@mark/contracts
 import { useActionNotifications } from "../hooks/useActionNotifications";
 import type { CatalogListItem } from "../tabs/AppsTab";
 import type { TimelineViewItem } from "../tabs/TimelineTab";
-import type { StageMode, TaskNotification } from "../uiTypes";
+import type { StageMode, TaskNotification, TaskNotificationTone } from "../uiTypes";
 import type { ActionTimelineItem } from "../useVoiceAgent";
 import { ActionNotificationCard } from "./ActionNotificationCard";
 import { ActionNotificationLane } from "./ActionNotificationLane";
@@ -93,6 +93,8 @@ export function VoiceStage({
     pendingAction,
     actionStatus
   });
+  const fallbackNotifications = useMemo(() => buildFallbackNotifications(), []);
+  const laneNotifications = notifications.length > 0 ? notifications : fallbackNotifications;
 
   const stageMode = useMemo<StageMode>(() => {
     if (actionStatus?.status === "executing") {
@@ -315,7 +317,7 @@ export function VoiceStage({
           ) : null}
 
           <ActionNotificationLane
-            notifications={notifications}
+            notifications={laneNotifications}
             pendingAction={pendingAction}
             onApprovePending={onApprovePending}
             onRejectPending={onRejectPending}
@@ -329,7 +331,15 @@ export function VoiceStage({
         onClose={() => setSettingsOpen(false)}
         returnFocusRef={settingsTriggerRef}
         defaultSection={settingsSection}
+        connected={connected}
         isRunning={isRunning}
+        isMicMuted={isMicMuted}
+        voiceState={voiceState}
+        audioLevel={audioLevel}
+        userPartial={userPartial}
+        userFinal={userFinal}
+        agentPartial={agentPartial}
+        agentFinal={agentFinal}
         canResetMemory={connected}
         sessionId={sessionId}
         sttMessage={sttMessage}
@@ -416,4 +426,55 @@ function shouldShowApprovalControls(notification: TaskNotification, pendingActio
     notification.revisionId === pendingAction.revisionId &&
     notification.tone === "approval"
   );
+}
+
+type FallbackNotificationSeed = {
+  id: string;
+  type: string;
+  message: string;
+  platformLabel: string;
+  tone: TaskNotificationTone;
+  minutesAgo: number;
+};
+
+const FALLBACK_NOTIFICATION_SEED: FallbackNotificationSeed[] = [
+  {
+    id: "slack-manager",
+    type: "placeholder.slack_manager",
+    message: '"Need the pricing response before 4pm. Churn risk is climbing on enterprise accounts."',
+    platformLabel: "slack",
+    tone: "working",
+    minutesAgo: 2
+  },
+  {
+    id: "linkedin-client",
+    type: "placeholder.linkedin_client",
+    message: '"Can we align on the rollout timeline for next week?"',
+    platformLabel: "linkedin",
+    tone: "approval",
+    minutesAgo: 9
+  },
+  {
+    id: "email-big-deal",
+    type: "placeholder.email_deal",
+    message: "MegaBank signed today: +$480k ARR impact expected this quarter.",
+    platformLabel: "gmail",
+    tone: "success",
+    minutesAgo: 17
+  }
+];
+
+function buildFallbackNotifications(referenceTimeMs: number = Date.now()): TaskNotification[] {
+  return FALLBACK_NOTIFICATION_SEED.map((seed) => ({
+    id: `placeholder:${seed.id}`,
+    signature: `placeholder:${seed.id}`,
+    actionId: null,
+    revisionId: null,
+    type: seed.type,
+    message: seed.message,
+    platformLabel: seed.platformLabel,
+    tone: seed.tone,
+    visualState: "visible",
+    createdAt: new Date(referenceTimeMs - seed.minutesAgo * 60_000).toISOString()
+  }));
 }

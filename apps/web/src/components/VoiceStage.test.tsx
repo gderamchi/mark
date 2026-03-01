@@ -153,13 +153,23 @@ describe("VoiceStage", () => {
     expect(screen.getByText(/Draft a brief follow-up email to the engineering team/i)).toBeInTheDocument();
   });
 
-  it("shows an activity empty state when there are no live notifications", () => {
+  it("shows compact fallback activity cards when there are no live notifications", () => {
     render(<VoiceStage {...createBaseProps()} />);
 
-    expect(screen.getByText("No recent actions yet.")).toBeInTheDocument();
-    expect(screen.getByText(/Speak to generate your first activity item./i)).toBeInTheDocument();
+    expect(screen.getByText("Slack from your manager")).toBeInTheDocument();
+    expect(screen.getByText(/need the pricing response before 4pm/i)).toBeInTheDocument();
+    expect(screen.getByText("LinkedIn client message")).toBeInTheDocument();
+    expect(screen.getByText(/rollout timeline for next week/i)).toBeInTheDocument();
+    expect(screen.getByText("Big deal email")).toBeInTheDocument();
+    expect(screen.getByText(/\+\$480k ARR impact expected this quarter/i)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "slack logo" })).toHaveAttribute("src", "https://cdn.simpleicons.org/slack/4A154B");
+    expect(screen.getByRole("img", { name: "linkedin logo" })).toHaveAttribute(
+      "src",
+      "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/linkedin.svg"
+    );
+    expect(screen.getByRole("img", { name: "gmail logo" })).toHaveAttribute("src", "https://cdn.simpleicons.org/gmail/EA4335");
     expect(screen.getByRole("button", { name: "View all" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No recent actions yet.")).not.toBeInTheDocument();
   });
 
   it("opens the notifications page when View all is pressed", async () => {

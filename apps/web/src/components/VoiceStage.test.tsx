@@ -150,7 +150,7 @@ describe("VoiceStage", () => {
     render(<VoiceStage {...createBaseProps()} />);
 
     expect(screen.getByRole("heading", { name: "Recent Activity" })).toBeInTheDocument();
-    expect(screen.getByText(/Draft a brief follow-up email to the engineering team/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ready\. I restored your active inbox workflow/i)).toBeInTheDocument();
   });
 
   it("shows compact fallback activity cards when there are no live notifications", () => {

@@ -142,7 +142,7 @@ export function VoiceStage({
       return `You: ${finalUser}`;
     }
 
-    return "Draft a brief follow-up email to the engineering team about the Q4 sprint progress and next steps.";
+    return "Agent: Ready. I restored your active inbox workflow and I can continue from where we stopped.";
   }, [agentFinal, agentPartial, stageMode, userFinal, userPartial]);
   const caption = useMemo(() => shorten(fullCaption, CAPTION_PREVIEW_LIMIT), [fullCaption]);
   const canExpandCaption = fullCaption.length > CAPTION_PREVIEW_LIMIT;

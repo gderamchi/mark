@@ -1,0 +1,39 @@
+
+> mark-voice-agent@0.1.0 dev /Users/benoit/Documents/HAck V Samir/mark
+> pnpm --filter @mark/contracts build && concurrently -k "pnpm --filter @mark/server dev" "pnpm --filter @mark/web dev"
+
+
+> @mark/contracts@0.1.0 build /Users/benoit/Documents/HAck V Samir/mark/packages/contracts
+> tsc -p tsconfig.json
+
+[0] 
+[0] > @mark/server@0.1.0 predev /Users/benoit/Documents/HAck V Samir/mark/apps/server
+[0] > pnpm --filter @mark/contracts build
+[0] 
+[1] 
+[1] > @mark/web@0.1.0 predev /Users/benoit/Documents/HAck V Samir/mark/apps/web
+[1] > pnpm --filter @mark/contracts build
+[1] 
+[1] 
+[1] > @mark/contracts@0.1.0 build /Users/benoit/Documents/HAck V Samir/mark/packages/contracts
+[1] > tsc -p tsconfig.json
+[1] 
+[0] 
+[0] > @mark/contracts@0.1.0 build /Users/benoit/Documents/HAck V Samir/mark/packages/contracts
+[0] > tsc -p tsconfig.json
+[0] 
+[1] 
+[1] > @mark/web@0.1.0 dev /Users/benoit/Documents/HAck V Samir/mark/apps/web
+[1] > vite
+[1] 
+[0] 
+[0] > @mark/server@0.1.0 dev /Users/benoit/Documents/HAck V Samir/mark/apps/server
+[0] > tsx watch src/main.ts
+[0] 
+[1] 
+[1]   VITE v7.3.1  ready in 95 ms
+[1] 
+[1]   ➜  Local:   http://localhost:5173/
+[1]   ➜  Network: http://10.110.58.248:5173/
+[1]   ➜  Network: http://192.168.64.1:5173/
+[0] server listening on http://localhost:4000

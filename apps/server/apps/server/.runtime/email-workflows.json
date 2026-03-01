@@ -121,7 +121,7 @@
       "userId": "14f93370-135e-4474-b05d-f7a842b71f9a",
       "sessionId": "e0EN8zdtqO39a8wvAAAB",
       "createdAt": "2026-03-01T07:08:12.310Z",
-      "updatedAt": "2026-03-01T09:10:13.035Z",
+      "updatedAt": "2026-03-01T07:08:12.310Z",
       "windowLabel": "the last 2 hours",
       "resolvedQuery": "newer_than:2h label:inbox is:unread",
       "timeZone": "Europe/Paris",
@@ -131,7 +131,7 @@
       "respondNeededItems": [],
       "mustKnowItems": [],
       "conversation": {
-        "phase": "idle",
+        "phase": "awaiting_choice",
         "selectedCategory": null,
         "selectedIndexByCategory": {
           "respond_needed": 0,
@@ -142,59 +142,29 @@
       }
     },
     {
-      "workflowId": "e906624c-b62e-4296-bc51-54a2028f8db7",
-      "userId": "14f93370-135e-4474-b05d-f7a842b71f9a",
-      "sessionId": "8TWwXdbE0YSkhNeHAAAD",
-      "createdAt": "2026-03-01T09:12:41.693Z",
-      "updatedAt": "2026-03-01T09:13:54.290Z",
+      "workflowId": "8099c161-67b8-43e4-8510-f719db0de56d",
+      "userId": "560fdf4a-7281-4da3-a787-494c3800a56f",
+      "sessionId": "nzDxUzv0OKdfr53eAAAD",
+      "createdAt": "2026-03-01T13:57:02.588Z",
+      "updatedAt": "2026-03-01T13:57:02.588Z",
       "windowLabel": "the last 24 hours",
       "resolvedQuery": "newer_than:1d label:inbox is:unread",
       "timeZone": "Europe/Paris",
-      "scannedCount": 19,
-      "optionalCount": 17,
+      "scannedCount": 13,
+      "optionalCount": 11,
       "capHit": false,
-      "respondNeededItems": [
+      "respondNeededItems": [],
+      "mustKnowItems": [
         {
-          "id": "19ca7f76013c99c0",
-          "threadId": "19ca7f76013c99c0",
-          "from": "Gui deramchite <guigui.dz31@gmail.com>",
-          "subject": "Partnership with Nvidia",
-          "timestamp": "2026-03-01T05:55:22.000Z",
-          "snippet": "Hello Samir, Hope you’re doing well! Just came around saw your email and wanted to get some news… Turns out we’re now recruiting at Nvidia and as I know you’re a cracked builder I supposed you would be int...(truncated)",
+          "id": "19ca99c4636067a0",
+          "threadId": "19ca8d6cbbeeade5",
+          "from": "Google <no-reply@accounts.google.com>",
+          "subject": "Security alert",
+          "timestamp": "2026-03-01T13:35:15.000Z",
+          "snippet": "[image: Google] You allowed Composio access to some of your Google Account data benoitbaillon78@gmail.com If you didn’t allow Composio access to some of your Google Account data, someone else may be trying...(truncated)",
           "labelIds": [
             "UNREAD",
             "IMPORTANT",
-            "CATEGORY_PERSONAL",
-            "INBOX"
-          ],
-          "category": "respond_needed",
-          "reason": "Personal message from Gui about Nvidia recruiting opportunity - direct outreach expecting response",
-          "status": "drafted",
-          "selectedAt": "2026-03-01T09:13:07.670Z",
-          "sentAt": null,
-          "sentActionId": null,
-          "sentRevisionId": null,
-          "sentToolSlug": null,
-          "draftVersions": [
-            {
-              "versionId": "7379c158-f5b5-4dfd-a13e-9d9c5fdc8752",
-              "createdAt": "2026-03-01T09:13:34.022Z",
-              "instruction": "Draft a polite reply to Gui about the Nvidia partnership/recruiting opportunity",
-              "text": "Subject: Re: Partnership with Nvidia Hi Gui, Great to hear from you! Thanks for thinking of me for the Nvidia opportunity – that sounds really exciting. I'd love to learn more about the role and what you're looking for. Could you share some details about the position, team, and what the recruiting process looks like? Looking forward to hearing more. Best, Samir"
-            }
-          ]
-        }
-      ],
-      "mustKnowItems": [
-        {
-          "id": "19ca7bafe2b7ad9d",
-          "threadId": "19ca7bafe2b7ad9d",
-          "from": "Google <no-reply@accounts.google.com>",
-          "subject": "Security alert",
-          "timestamp": "2026-03-01T04:49:34.000Z",
-          "snippet": "[image: Google] You allowed Composio access to some of your Google Account data gderamchi@gmail.com If you didn’t allow Composio access to some of your Google Account data, someone else may be trying to ac...(truncated)",
-          "labelIds": [
-            "UNREAD",
             "CATEGORY_UPDATES",
             "INBOX"
           ],
@@ -207,10 +177,33 @@
           "sentRevisionId": null,
           "sentToolSlug": null,
           "draftVersions": []
+        },
+        {
+          "id": "19ca628e65c347cf",
+          "threadId": "19ca5ee9fca1b387",
+          "from": "Google <no-reply@accounts.google.com>",
+          "subject": "Alerte de sécurité pour fantouille9@gmail.com",
+          "timestamp": "2026-02-28T21:30:23.000Z",
+          "snippet": "Ceci est une copie d'une alerte de sécurité envoyée à fantouille9@gmail.com. benoitbaillon78@gmail.com est l'adresse e-mail de récupération de ce compte. Si vous ne reconnaissez pas ce compte, supprimez-la...(truncated)",
+          "labelIds": [
+            "UNREAD",
+            "IMPORTANT",
+            "CATEGORY_UPDATES",
+            "INBOX"
+          ],
+          "category": "must_know",
+          "reason": "Google security alert for account – potential unauthorized access or security event requiring immediate attention",
+          "status": "triaged",
+          "selectedAt": null,
+          "sentAt": null,
+          "sentActionId": null,
+          "sentRevisionId": null,
+          "sentToolSlug": null,
+          "draftVersions": []
         }
       ],
       "conversation": {
-        "phase": "idle",
+        "phase": "awaiting_choice",
         "selectedCategory": null,
         "selectedIndexByCategory": {
           "respond_needed": 0,

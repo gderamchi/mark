@@ -4,8 +4,8 @@ Authenticated voice-first web app using:
 - Supabase (Google OAuth + persistent audit storage)
 - Composio (connectable app catalog + tool execution)
 - Anthropic (reasoning + tool orchestration + draft revision)
-- Speechmatics (one-shot STT)
-- Speechmatics-first TTS (`wav_16000`) with ElevenLabs fallback
+- ElevenLabs (one-shot STT + streaming TTS)
+- Speechmatics (STT/TTS fallback providers)
 
 Flow:
 - Browser records utterances, auto-detects end-of-speech, encodes to MP3, and sends one-shot audio for STT.
@@ -36,11 +36,13 @@ Required server env keys:
 - `COMPOSIO_API_KEY`
 - `COMPOSIO_CONNECT_CALLBACK_URL`
 - `ANTHROPIC_API_KEY`
-- `SPEECHMATICS_API_KEY`
-- `SPEECHMATICS_TTS_BASE_URL` (default provided)
-- `SPEECHMATICS_TTS_VOICE` (default `sarah`)
-- `SPEECHMATICS_TTS_OUTPUT_FORMAT` (default `wav_16000`)
+- `ANTHROPIC_MODEL` (recommended: `claude-haiku-4-5`)
 - `ELEVENLABS_API_KEY`
+- `ELEVENLABS_STT_MODEL_ID` (default `scribe_v1`)
+- `SPEECHMATICS_API_KEY` (optional fallback)
+- `SPEECHMATICS_TTS_BASE_URL` (optional fallback, default provided)
+- `SPEECHMATICS_TTS_VOICE` (optional fallback, default `sarah`)
+- `SPEECHMATICS_TTS_OUTPUT_FORMAT` (optional fallback, default `wav_16000`)
 
 Required web env keys:
 - `VITE_SUPABASE_URL`
@@ -83,5 +85,5 @@ pnpm test
 - General chat memory remains in-memory and can reset on restart.
 - Gmail triage workflow memory (selection/draft/sent progress) is persisted locally in `apps/server/.runtime/email-workflows.json`.
 - Action/audit persistence is available when Supabase schema is applied.
-- TTS priority is Speechmatics first, then ElevenLabs fallback.
+- STT/TTS priority is ElevenLabs first, then Speechmatics fallback.
 - Real credentials should stay in `.env.local` only.

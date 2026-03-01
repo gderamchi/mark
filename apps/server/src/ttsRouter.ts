@@ -43,48 +43,48 @@ export class TtsRouter {
     signal?: AbortSignal
   ): Promise<TtsSynthesisResult> {
     try {
-      const speechmaticsResult = await this.speechmaticsTts.synthesizeStream(
+      const elevenLabsStreamId = await this.elevenLabsTts.synthesizeStream(
         text,
         (chunk, streamId) => {
           onChunk({
             chunk,
             streamId,
-            provider: "speechmatics",
-            contentType: "audio/wav"
+            provider: "elevenlabs",
+            contentType: "audio/mpeg"
           });
         },
         signal
       );
 
       return {
-        streamId: speechmaticsResult.streamId,
-        provider: "speechmatics",
-        contentType: speechmaticsResult.contentType
+        streamId: elevenLabsStreamId,
+        provider: "elevenlabs",
+        contentType: "audio/mpeg"
       };
     } catch (err) {
       if (isAbortError(err)) {
         throw err;
       }
-      // Fall through to ElevenLabs fallback
+      // Fall through to Speechmatics fallback.
     }
 
-    const streamId = await this.elevenLabsTts.synthesizeStream(
+    const speechmaticsResult = await this.speechmaticsTts.synthesizeStream(
       text,
-      (chunk, id) => {
+      (chunk, streamId) => {
         onChunk({
           chunk,
-          streamId: id,
-          provider: "elevenlabs",
-          contentType: "audio/mpeg"
+          streamId,
+          provider: "speechmatics",
+          contentType: "audio/wav"
         });
       },
       signal
     );
 
     return {
-      streamId,
-      provider: "elevenlabs",
-      contentType: "audio/mpeg"
+      streamId: speechmaticsResult.streamId,
+      provider: "speechmatics",
+      contentType: speechmaticsResult.contentType
     };
   }
 }

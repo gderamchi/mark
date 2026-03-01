@@ -126,7 +126,7 @@ export class AnthropicService {
 
   async generateImmediateAck(userText: string): Promise<string> {
     if (!this.env.anthropicApiKey) {
-      return fallbackImmediateAck(userText);
+      return fallbackImmediateAck();
     }
 
     try {
@@ -145,7 +145,7 @@ export class AnthropicService {
       // Falls back below.
     }
 
-    return fallbackImmediateAck(userText);
+    return fallbackImmediateAck();
   }
 
   async generateReply(
@@ -445,6 +445,7 @@ export class AnthropicService {
 function getBaseSystemPrompt(): string {
   return [
     "You are a natural voice assistant.",
+    "Always respond in clear natural English.",
     "Keep responses concise, friendly, and easy to listen to.",
     "Use context from prior turns when useful."
   ].join(" ");
@@ -453,6 +454,7 @@ function getBaseSystemPrompt(): string {
 function getToolSystemPrompt(): string {
   return [
     "You are a voice action assistant with tools.",
+    "Always respond in clear natural English.",
     "Use tools whenever they provide concrete data.",
     "For read/list/search style tasks: call tools directly and then summarize clearly.",
     "For write/send/create/update/delete style tasks: still choose the correct tool and arguments.",
@@ -464,7 +466,7 @@ function getToolSystemPrompt(): string {
 function getImmediateAckSystemPrompt(): string {
   return [
     "You produce only an immediate acknowledgement before a longer task runs.",
-    "Reply in the same language as the user.",
+    "Reply in English.",
     "Use one short sentence (maximum 22 words).",
     "Confirm that you understood and that the user should wait while you work.",
     "No markdown, no bullets, no extra commentary."
@@ -496,7 +498,7 @@ function getEmailWorkflowDecisionPrompt(): string {
 function getEmailWorkflowPolishPrompt(): string {
   return [
     "You rewrite a server-produced email workflow response for natural voice conversation.",
-    "Output one to three short sentences in the same language as userText.",
+    "Output one to three short sentences in English.",
     "Preserve all concrete facts from rawReply: counts, categories, sender names, subject meaning, and outcomes.",
     "Do not invent new facts, actions, tools, or dates.",
     "Do not use markdown, bullets, or code fences."
@@ -584,10 +586,7 @@ function fallbackReply(userText: string): string {
   return "I heard you. Could you add one more detail so I can give a sharper answer?";
 }
 
-function fallbackImmediateAck(userText: string): string {
-  if (looksFrench(userText)) {
-    return "D'accord, je m'en occupe. Veuillez patienter pendant que je traite la tâche.";
-  }
+function fallbackImmediateAck(): string {
   return "Got it. I am on it now. Please wait while I complete the task.";
 }
 
@@ -599,14 +598,6 @@ function normalizeImmediateAck(value: string): string {
 
   const words = cleaned.split(" ").slice(0, 22);
   return words.join(" ");
-}
-
-function looksFrench(text: string): boolean {
-  const normalized = text.toLowerCase();
-  return (
-    /[àâçéèêëîïôûùüÿœ]/.test(normalized) ||
-    /\b(je|tu|vous|nous|bonjour|merci|avec|pour|sur|dans|pas|oui|non|s'il|d'accord)\b/.test(normalized)
-  );
 }
 
 async function safeText(response: Response): Promise<string> {

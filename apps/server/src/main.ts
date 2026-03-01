@@ -42,6 +42,7 @@ import { AuditService } from "./audit.js";
 import { ComposioService, type AgentToolDefinition } from "./composio.js";
 import { EmailIntentRouter, type EmailIntent, normalizeTimeZone } from "./emailIntentRouter.js";
 import { ElevenLabsService } from "./elevenlabs.js";
+import { ElevenLabsSttService } from "./elevenlabsStt.js";
 import { getEnvConfig } from "./env.js";
 import {
   EmailWorkflowStore,
@@ -53,6 +54,7 @@ import { GmailInboxTriageService, type TriagedEmail } from "./gmailInboxTriage.j
 import { GmailPriorityLlmClassifier } from "./gmailPriorityLlm.js";
 import { SpeechmaticsAdapter } from "./speechmatics.js";
 import { SpeechmaticsTtsService } from "./speechmaticsTts.js";
+import { SttRouter } from "./sttRouter.js";
 import { TtsRouter } from "./ttsRouter.js";
 
 type EmailTriageCache = {
@@ -77,6 +79,14 @@ type EmailFocusCategory = "respond_needed" | "must_know";
 
 type EmailConversationState = EmailWorkflowConversation;
 
+type InternalReadToolName = "MARK_LIST_ACTION_HISTORY";
+
+type InternalReadToolDefinition = {
+  name: InternalReadToolName;
+  description: string;
+  input_schema: Record<string, unknown>;
+};
+
 type SessionState = {
   user: AuthenticatedUser;
   timeZone: string;
@@ -94,7 +104,9 @@ type AuthedRequest = Request & {
 };
 
 const env = getEnvConfig();
-const stt = new SpeechmaticsAdapter(env);
+const elevenLabsStt = new ElevenLabsSttService(env);
+const speechmaticsStt = new SpeechmaticsAdapter(env);
+const stt = new SttRouter(elevenLabsStt, speechmaticsStt);
 const llm = new AnthropicService(env);
 const elevenLabsTts = new ElevenLabsService(env);
 const speechmaticsTts = new SpeechmaticsTtsService(env);
@@ -110,6 +122,25 @@ const gmailInboxTriage = new GmailInboxTriageService(composio, gmailPriorityClas
 const emailWorkflowStore = new EmailWorkflowStore();
 
 const EMAIL_REPLY_DRAFT_MAX_CHARS = 1_400;
+const INTERNAL_READ_TOOLS: InternalReadToolDefinition[] = [
+  {
+    name: "MARK_LIST_ACTION_HISTORY",
+    description:
+      "Returns recent persisted action timeline events for the signed-in user from Supabase (agent_event_log).",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 50,
+          description: "Number of most-recent events to return. Defaults to 15."
+        }
+      },
+      additionalProperties: false
+    }
+  }
+];
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -123,12 +154,17 @@ app.use(
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
-    sttConfigured: stt.isConfigured(),
+    sttConfigured: stt.isAnyConfigured(),
+    sttProviders: {
+      speechmaticsConfigured: speechmaticsStt.isConfigured(),
+      elevenLabsConfigured: elevenLabsStt.isConfigured(),
+      priority: ["elevenlabs", "speechmatics"] as const
+    },
     ttsConfigured: tts.isAnyConfigured(),
     ttsProviders: {
       speechmaticsConfigured: speechmaticsTts.isConfigured(),
       elevenLabsConfigured: elevenLabsTts.isConfigured(),
-      priority: ["speechmatics", "elevenlabs"] as const
+      priority: ["elevenlabs", "speechmatics"] as const
     },
     llmConfigured: llm.isConfigured(),
     authConfigured: auth.isConfigured(),
@@ -138,12 +174,17 @@ app.get("/health", (_req, res) => {
 
 app.get("/health/voice", (_req, res) => {
   res.json({
-    sttConfigured: stt.isConfigured(),
+    sttConfigured: stt.isAnyConfigured(),
+    sttProviders: {
+      speechmaticsConfigured: speechmaticsStt.isConfigured(),
+      elevenLabsConfigured: elevenLabsStt.isConfigured(),
+      priority: ["elevenlabs", "speechmatics"] as const
+    },
     ttsConfigured: tts.isAnyConfigured(),
     ttsProviders: {
       speechmaticsConfigured: speechmaticsTts.isConfigured(),
       elevenLabsConfigured: elevenLabsTts.isConfigured(),
-      priority: ["speechmatics", "elevenlabs"] as const
+      priority: ["elevenlabs", "speechmatics"] as const
     },
     llmConfigured: llm.isConfigured(),
     authConfigured: auth.isConfigured(),
@@ -284,10 +325,10 @@ namespace.on("connection", (socket) => {
   };
   socket.emit(WS_EVENTS.SESSION_STARTED, startedPayload);
 
-  if (!stt.isConfigured()) {
+  if (!stt.isAnyConfigured()) {
     emitSttStatus(socket, {
       code: "provider_error",
-      message: "SPEECHMATICS_API_KEY missing. STT provider unavailable."
+      message: "No STT provider is configured."
     });
   } else {
     emitSttStatus(socket, {
@@ -351,7 +392,7 @@ namespace.on("connection", (socket) => {
 
 async function handleUserUtterance(socket: Socket, payload: AudioUserUtteranceEvent): Promise<void> {
   const state = ensureSessionState(socket.id);
-  if (!stt.isConfigured()) {
+  if (!stt.isAnyConfigured()) {
     emitSttStatus(socket, {
       code: "provider_error",
       message: "Speech provider is not configured."
@@ -382,7 +423,7 @@ async function handleUserUtterance(socket: Socket, payload: AudioUserUtteranceEv
   });
 
   try {
-    const transcript = (await stt.transcribeUtterance(payload.audioBase64, payload.mimeType)).trim();
+    const transcript = (await stt.transcribeWithPriority(payload.audioBase64, payload.mimeType)).trim();
 
     if (!transcript) {
       emitSttStatus(socket, {
@@ -442,7 +483,7 @@ async function processFinalTranscript(socket: Socket, rawText: string): Promise<
 
   const emailIntent = emailIntentRouter.detect(text, { timeZone: state.timeZone });
   if (emailIntent) {
-    emitEmailProcessingAck(socket, text);
+    emitEmailProcessingAck(socket);
     let triageReply = "";
     try {
       triageReply = await handleEmailIntent(socket, state, emailIntent);
@@ -475,24 +516,35 @@ async function processFinalTranscript(socket: Socket, rawText: string): Promise<
       emitError(socket, `Tool catalog unavailable: ${toErrorMessage(toolCatalogError)}`);
       toolsByName = {};
     }
-    const availableTools = Object.values(toolsByName).map((tool) => ({
-      name: tool.toolName,
-      description: tool.description,
-      input_schema: tool.inputSchema
-    }));
+    const availableTools = [
+      ...INTERNAL_READ_TOOLS,
+      ...Object.values(toolsByName).map((tool) => ({
+        name: tool.toolName,
+        description: tool.description,
+        input_schema: tool.inputSchema
+      }))
+    ];
 
     const agentResult = await llm.generateReplyWithTools({
       sessionId: socket.id,
       userText: text,
       tools: availableTools,
       executeReadTool: async (toolName, args) => {
+        if (isInternalReadToolName(toolName)) {
+          return executeInternalReadTool(toolName, args, state.user.id);
+        }
         const tool = toolsByName[toolName];
         if (!tool) {
           throw new Error(`Tool ${toolName} is not available for this user.`);
         }
         return composio.executeTool(state.user.composioUserId, tool, args);
       },
-      isMutatingTool: (toolName) => toolsByName[toolName]?.isMutating ?? true,
+      isMutatingTool: (toolName) => {
+        if (isInternalReadToolName(toolName)) {
+          return false;
+        }
+        return toolsByName[toolName]?.isMutating ?? true;
+      },
       onPartial: (partialText) => {
         socket.emit(WS_EVENTS.AGENT_REPLY_PARTIAL, { text: partialText } satisfies AgentReplyEvent);
       }
@@ -1291,16 +1343,38 @@ function emitAgentReplyPartial(socket: Socket, text: string): void {
   }
 }
 
-function emitEmailProcessingAck(socket: Socket, userText: string): void {
-  const ack = looksFrenchText(userText)
-    ? "D'accord, je vérifie ta boîte mail."
-    : "Got it. I am checking your inbox now.";
+function emitEmailProcessingAck(socket: Socket): void {
+  const ack = "Got it. I am checking your inbox now.";
   socket.emit(WS_EVENTS.AGENT_REPLY_PARTIAL, { text: ack } satisfies AgentReplyEvent);
   socket.emit(WS_EVENTS.AGENT_REPLY_FINAL, { text: ack } satisfies AgentReplyEvent);
   emitSttStatus(socket, {
     code: "warming_up",
     message: "Processing your inbox request."
   });
+}
+
+function isInternalReadToolName(toolName: string): toolName is InternalReadToolName {
+  return toolName === "MARK_LIST_ACTION_HISTORY";
+}
+
+async function executeInternalReadTool(
+  toolName: InternalReadToolName,
+  args: Record<string, unknown>,
+  userId: string
+): Promise<unknown> {
+  switch (toolName) {
+    case "MARK_LIST_ACTION_HISTORY": {
+      const limit = clampInteger(readOptionalNumber(args.limit), 1, 50) ?? 15;
+      const items = await audit.listHistory(userId);
+      return {
+        source: "supabase.agent_event_log",
+        count: Math.min(limit, items.length),
+        items: items.slice(0, limit)
+      };
+    }
+    default:
+      return { error: "Unsupported internal read tool." };
+  }
 }
 
 function selectGmailReplyTool(toolsByName: Record<string, AgentToolDefinition>): AgentToolDefinition | null {
@@ -1452,10 +1526,6 @@ function buildReplySubject(subject: string): string {
     return trimmed;
   }
   return `Re: ${trimmed}`;
-}
-
-function looksFrenchText(text: string): boolean {
-  return /[àâçéèêëîïôûùüÿœ]/i.test(text) || /\b(oui|non|d'accord|mail|mails|répond|réponse|envoie|heure)\b/i.test(text);
 }
 
 function hydrateSessionFromLatestWorkflow(state: SessionState): void {
@@ -1612,6 +1682,33 @@ function readRequiredString(value: unknown, key: string): string | null {
   }
   const raw = (value as Record<string, unknown>)[key];
   return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+function readOptionalNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function clampInteger(value: number | null, min: number, max: number): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  const rounded = Math.trunc(value);
+  if (rounded < min) {
+    return min;
+  }
+  if (rounded > max) {
+    return max;
+  }
+  return rounded;
 }
 
 function pickConnectionId(query: Request["query"]): string | null {

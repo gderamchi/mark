@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { TriagedEmail } from "./gmailInboxTriage.js";
 
@@ -95,7 +96,8 @@ type CreateWorkflowParams = {
   mustKnowItems: TriagedEmail[];
 };
 
-const DEFAULT_STORAGE_PATH = path.resolve(process.cwd(), "apps/server/.runtime/email-workflows.json");
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_STORAGE_PATH = path.resolve(MODULE_DIR, "../.runtime/email-workflows.json");
 
 export class EmailWorkflowStore {
   private readonly storagePath: string;

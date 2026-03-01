@@ -205,6 +205,14 @@ export function App() {
 
     return [
       { label: "STT", value: agent.health.sttConfigured ? "ready" : "missing" },
+      {
+        label: "ElevenLabs STT",
+        value: agent.health.sttProviders?.elevenLabsConfigured ? "ready" : "missing"
+      },
+      {
+        label: "Speechmatics STT",
+        value: agent.health.sttProviders?.speechmaticsConfigured ? "ready" : "missing"
+      },
       { label: "LLM", value: agent.health.llmConfigured ? "ready" : "missing" },
       { label: "Composio", value: agent.health.composioConfigured ? "ready" : "missing" },
       { label: "Auth", value: agent.health.authConfigured ? "ready" : "missing" },

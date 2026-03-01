@@ -33,6 +33,8 @@ type EnvConfig = {
   elevenLabsApiKey: string | null;
   elevenLabsVoiceId: string;
   elevenLabsModelId: string;
+  elevenLabsSttModelId: string;
+  elevenLabsSttLanguageCode: string | null;
 };
 
 function readString(name: string, fallback = ""): string {
@@ -71,9 +73,21 @@ function readSpeechmaticsTtsOutputFormat(): "wav_16000" | "pcm_16000" {
   return raw === "pcm_16000" ? "pcm_16000" : "wav_16000";
 }
 
+function trimTrailingSlashes(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function normalizeOrigin(raw: string): string {
+  const cleaned = trimTrailingSlashes(raw.trim());
+  if (cleaned.length === 0) {
+    return "http://localhost:5173";
+  }
+  return cleaned;
+}
+
 export function getEnvConfig(): EnvConfig {
   const port = readNumber("PORT", 4000);
-  const webOrigin = readString("WEB_ORIGIN", "http://localhost:5173");
+  const webOrigin = normalizeOrigin(readString("WEB_ORIGIN", "http://localhost:5173"));
 
   return {
     port,
@@ -88,7 +102,7 @@ export function getEnvConfig(): EnvConfig {
       `http://localhost:${port}/v1/composio/connect/callback`
     ),
     anthropicApiKey: readOptional("ANTHROPIC_API_KEY"),
-    anthropicModel: readString("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+    anthropicModel: readString("ANTHROPIC_MODEL", "claude-haiku-4-5"),
     speechmaticsApiKey: readOptional("SPEECHMATICS_API_KEY"),
     speechmaticsApiBaseUrl: readString("SPEECHMATICS_API_BASE_URL", "https://asr.api.speechmatics.com/v2"),
     speechmaticsTtsBaseUrl: readString("SPEECHMATICS_TTS_BASE_URL", "https://preview.tts.speechmatics.com"),
@@ -100,7 +114,9 @@ export function getEnvConfig(): EnvConfig {
     speechmaticsMaxDelaySeconds: readNumber("SPEECHMATICS_MAX_DELAY_SECONDS", 1.1),
     elevenLabsApiKey: readOptional("ELEVENLABS_API_KEY"),
     elevenLabsVoiceId: readString("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-    elevenLabsModelId: readString("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+    elevenLabsModelId: readString("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"),
+    elevenLabsSttModelId: readString("ELEVENLABS_STT_MODEL_ID", "scribe_v1"),
+    elevenLabsSttLanguageCode: readOptional("ELEVENLABS_STT_LANGUAGE_CODE")
   };
 }
 

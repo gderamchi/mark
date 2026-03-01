@@ -32,6 +32,11 @@ import { WaitingCuePlayer } from "./waitingCue";
 
 type VoiceHealth = {
   sttConfigured: boolean;
+  sttProviders?: {
+    speechmaticsConfigured: boolean;
+    elevenLabsConfigured: boolean;
+    priority: Array<"speechmatics" | "elevenlabs">;
+  };
   ttsConfigured: boolean;
   ttsProviders?: {
     speechmaticsConfigured: boolean;
